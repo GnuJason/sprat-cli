@@ -35,6 +35,7 @@ struct Sprite {
     bool dither = false;
     int colors = 0;
     std::vector<Marker> markers;
+    std::string alias_of;  // Non-empty if this is an alias of another sprite
 };
 
 struct Atlas {
@@ -52,6 +53,7 @@ struct Layout {
     bool has_multipack = false;
     std::vector<Sprite> sprites;
     std::vector<Marker> global_markers;
+    std::vector<std::pair<std::string, std::string>> aliases;  // (alias_path, canonical_path) pairs
 };
 
 bool parse_int(const std::string& token, int& out);
@@ -63,6 +65,7 @@ bool parse_atlas_line(const std::string& line, int& width, int& height);
 bool parse_scale_line(const std::string& line, double& scale);
 bool parse_extrude_line(const std::string& line, int& extrude);
 bool parse_multipack_line(const std::string& line, bool& multipack);
+bool parse_alias_line(const std::string& line, std::string& alias_path, std::string& canonical_path, std::string& error);
 bool parse_layout(std::istream& in, Layout& out, std::string& error);
 
 } // namespace sprat::core

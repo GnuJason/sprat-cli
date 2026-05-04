@@ -211,13 +211,36 @@ if(NOT ZOPFLIPNG_FOUND)
         set(ZOPFLIPNG_LIBRARIES ${ZOPFLIPNG_LIBRARY})
         set(ZOPFLIPNG_INCLUDE_DIRS ${ZOPFLIPNG_INCLUDE_DIR})
         set(ZOPFLIPNG_FOUND TRUE)
-        
+
         # Attempt to locate zopflipng DLL for copying
         if(WIN32 AND NOT SPRAT_STATIC)
             get_filename_component(ZOPFLIPNG_ROOT "${ZOPFLIPNG_INCLUDE_DIR}/.." ABSOLUTE)
             find_file(ZOPFLIPNG_DLL NAMES zopflipng.dll libzopflipng.dll
                       HINTS "${ZOPFLIPNG_ROOT}/bin" "${ZOPFLIPNG_ROOT}" "${ZOPFLIPNG_INCLUDE_DIR}"
                       DOC "Path to zopflipng DLL")
+        endif()
+    endif()
+endif()
+
+# Squish (libsquish) detection for GPU compression
+if(PkgConfig_FOUND)
+    pkg_check_modules(SQUISH squish)
+endif()
+
+if(NOT SQUISH_FOUND)
+    find_library(SQUISH_LIBRARY NAMES squish libsquish)
+    find_path(SQUISH_INCLUDE_DIR NAMES squish.h)
+    if(SQUISH_LIBRARY AND SQUISH_INCLUDE_DIR)
+        set(SQUISH_LIBRARIES ${SQUISH_LIBRARY})
+        set(SQUISH_INCLUDE_DIRS ${SQUISH_INCLUDE_DIR})
+        set(SQUISH_FOUND TRUE)
+
+        # Attempt to locate squish DLL for copying
+        if(WIN32 AND NOT SPRAT_STATIC)
+            get_filename_component(SQUISH_ROOT "${SQUISH_INCLUDE_DIR}/.." ABSOLUTE)
+            find_file(SQUISH_DLL NAMES squish.dll libsquish.dll
+                      HINTS "${SQUISH_ROOT}/bin" "${SQUISH_ROOT}" "${SQUISH_INCLUDE_DIR}"
+                      DOC "Path to squish DLL")
         endif()
     endif()
 endif()
@@ -259,6 +282,11 @@ if(ZOPFLIPNG_FOUND)
     target_link_libraries(spratpack PRIVATE ${ZOPFLIPNG_LIBRARIES})
     target_include_directories(spratpack PRIVATE ${ZOPFLIPNG_INCLUDE_DIRS})
     target_compile_definitions(spratpack PRIVATE SPRAT_HAS_ZOPFLI)
+endif()
+if(SQUISH_FOUND)
+    target_link_libraries(spratpack PRIVATE ${SQUISH_LIBRARIES})
+    target_include_directories(spratpack PRIVATE ${SQUISH_INCLUDE_DIRS})
+    target_compile_definitions(spratpack PRIVATE SPRAT_HAS_SQUISH)
 endif()
 target_include_directories(spratpack PRIVATE ${LIBARCHIVE_INCLUDE_DIRS})
 target_include_directories(spratpack SYSTEM PRIVATE ${STB_DIR})
@@ -316,6 +344,14 @@ foreach(target spratlayout spratpack spratconvert spratframes spratunpack)
                         "${ZOPFLIPNG_DLL}"
                         $<TARGET_FILE_DIR:${target}>/
                     COMMENT "Copying zopflipng DLL to $<TARGET_FILE_DIR:${target}>"
+                    VERBATIM)
+            endif()
+            if(SQUISH_DLL AND (target STREQUAL "spratpack"))
+                add_custom_command(TARGET ${target} POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${SQUISH_DLL}"
+                        $<TARGET_FILE_DIR:${target}>/
+                    COMMENT "Copying squish DLL to $<TARGET_FILE_DIR:${target}>"
                     VERBATIM)
             endif()
         endif()

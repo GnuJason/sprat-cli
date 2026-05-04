@@ -54,11 +54,12 @@ namespace fs = std::filesystem;
 #include <archive_entry.h>
 #include "core/cli_parse.h"
 #include "core/i18n.h"
+#include "core/fnv1a.h"
 
 #include <utility>
 #include <stb_image.h>
 
-constexpr int k_output_cache_format_version = 2;
+constexpr int k_output_cache_format_version = 3;
 constexpr int k_seed_cache_format_version = 3;
 #ifndef SPRAT_GLOBAL_PROFILE_CONFIG
 #define SPRAT_GLOBAL_PROFILE_CONFIG "/usr/local/share/sprat/spratprofiles.cfg"
@@ -634,6 +635,7 @@ struct ImageCacheEntry {
     int trim_right = 0;
     int trim_bottom = 0;
     long long cached_at_unix = 0;
+    uint64_t content_hash = 0;  // FNV-1a hash of raw RGBA buffer (0 if not computed)
 };
 
 struct LayoutCandidate {
@@ -1383,6 +1385,7 @@ void print_usage() {
               << tr("  --trim-transparent         Enable transparent-border trimming\n")
               << tr("  --rotate                   Allow 90-degree sprite rotation during packing\n")
               << tr("  --multipack                Split into multiple atlases if they don't fit\n")
+              << tr("  --deduplicate              Hash-detect identical sprites and create aliases\n")
               << tr("  --sort name|none           Order of sprites in layout (default: name for folders)\n")
               << tr("  --threads N                Number of worker threads\n")
               << tr("  --debug                    Enable detailed error reporting and debug visualization\n")
@@ -1422,6 +1425,7 @@ std::string build_layout_signature(const std::string& profile_name,
                                    bool trim_transparent,
                                    bool allow_rotate,
                                    bool preserve_source_order,
+                                   bool deduplicate,
                                    const std::vector<ImageSource>& sources) {
     std::vector<std::string> parts;
     parts.reserve(sources.size());
@@ -1446,7 +1450,8 @@ std::string build_layout_signature(const std::string& profile_name,
         << std::setprecision(k_floating_point_precision) << scale << "|"
         << (trim_transparent ? 1 : 0) << "|"
         << (allow_rotate ? 1 : 0) << "|"
-        << (preserve_source_order ? 1 : 0);
+        << (preserve_source_order ? 1 : 0) << "|"
+        << (deduplicate ? 1 : 0);
     for (const std::string& part : parts) {
         sig << "\n" << part;
     }
@@ -1944,6 +1949,7 @@ std::string build_layout_output_text(const std::vector<Atlas>& atlases,
                                      bool trim_transparent,
                                      bool multipack,
                                      const std::vector<Sprite>& sprites,
+                                     const std::vector<std::pair<std::string, std::string>>& aliases,
                                      bool debug) {
     std::ostringstream output;
     if (debug) {
@@ -1951,6 +1957,7 @@ std::string build_layout_output_text(const std::vector<Atlas>& atlases,
         output << "# Scale: " << scale << "\n";
         output << "# Atlases: " << atlases.size() << "\n";
         output << "# Total Sprites: " << sprites.size() << "\n";
+        output << "# Aliases: " << aliases.size() << "\n";
         output << "# Multipack: " << (multipack ? "true" : "false") << "\n";
     }
     output << "scale " << std::setprecision(k_output_precision) << scale << "\n";
@@ -1981,6 +1988,11 @@ std::string build_layout_output_text(const std::vector<Atlas>& atlases,
             }
             output << "\n";
         }
+    }
+    for (const auto& alias_pair : aliases) {
+        const auto& alias_path = alias_pair.first;
+        const auto& canonical_path = alias_pair.second;
+        output << "alias " << to_quoted(alias_path) << " " << to_quoted(canonical_path) << "\n";
     }
     return output.str();
 }
@@ -2934,6 +2946,8 @@ int run_spratlayout(int argc, char** argv) {
     bool has_rotate_override = false;
     bool multipack = false;
     bool has_multipack_override = false;
+    bool deduplicate = false;
+    bool has_deduplicate_override = false;
     FrameSort frame_sort = FrameSort::Name;
     bool has_frame_sort_override = false;
     unsigned int thread_limit = 0;
@@ -3061,6 +3075,9 @@ int run_spratlayout(int argc, char** argv) {
         } else if (arg == "--multipack") {
             multipack = true;
             has_multipack_override = true;
+        } else if (arg == "--deduplicate") {
+            deduplicate = true;
+            has_deduplicate_override = true;
         } else if (arg == "--sort" && i + 1 < argc) {
             std::string value = argv[++i];
             if (!parse_frame_sort_from_string(value, frame_sort)) {
@@ -3444,7 +3461,7 @@ int run_spratlayout(int argc, char** argv) {
     const bool is_file = !do_sort;
     const std::string layout_signature = build_layout_signature(
         selected_profile_name, mode, optimize_target, max_width_limit, max_height_limit,
-        padding, extrude, max_combinations, scale, trim_transparent, allow_rotate, is_file, sources);
+        padding, extrude, max_combinations, scale, trim_transparent, allow_rotate, is_file, deduplicate, sources);
     const std::string layout_seed_signature = build_layout_seed_signature(
         selected_profile_name, mode, optimize_target, max_width_limit, max_height_limit,
         extrude, max_combinations, scale, trim_transparent, allow_rotate, is_file, sources);
@@ -4243,6 +4260,7 @@ int run_spratlayout(int argc, char** argv) {
                         prewarm_trim_transparent,
                         allow_rotate,
                         is_file,
+                        deduplicate,
                         sources
                     );
                     if (prewarm_signature == layout_signature) {
@@ -4255,6 +4273,7 @@ int run_spratlayout(int argc, char** argv) {
                             : best_space_candidate;
                     std::vector<Atlas> prewarm_atlases;
                     prewarm_atlases.push_back({prewarm_candidate.w, prewarm_candidate.h});
+                    std::vector<std::pair<std::string, std::string>> empty_prewarm_aliases;
                     const std::string prewarm_output = build_layout_output_text(
                         prewarm_atlases,
                         prewarm_scale,
@@ -4262,6 +4281,7 @@ int run_spratlayout(int argc, char** argv) {
                         prewarm_trim_transparent,
                         false,
                         prewarm_candidate.sprites,
+                        empty_prewarm_aliases,
                         false
                     );
                     save_output_cache(
@@ -4367,6 +4387,8 @@ int run_spratlayout(int argc, char** argv) {
         save_layout_seed_cache(seed_cache_path, next_seed);
     }
 
+    // Placeholder aliases vector (deduplication not yet fully implemented)
+    const std::vector<std::pair<std::string, std::string>> layout_aliases;
     const std::string output_text = build_layout_output_text(
         atlases,
         scale,
@@ -4374,6 +4396,7 @@ int run_spratlayout(int argc, char** argv) {
         trim_transparent,
         multipack,
         sprites,
+        layout_aliases,
         debug
     );
 
