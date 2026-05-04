@@ -199,6 +199,52 @@ bool parse_multipack_line(const std::string& line, bool& multipack) {
     return true;
 }
 
+bool parse_alias_line(const std::string& line, std::string& alias_path, std::string& canonical_path, std::string& error) {
+    constexpr std::string_view prefix = "alias";
+    if (!line.starts_with(prefix)) {
+        error = "line does not start with alias";
+        return false;
+    }
+
+    size_t pos = prefix.size();
+    while (pos < line.size() && std::isspace(static_cast<unsigned char>(line[pos])) != 0) {
+        ++pos;
+    }
+
+    if (pos >= line.size() || line[pos] != '"') {
+        error = "alias path must be quoted";
+        return false;
+    }
+
+    if (!parse_quoted(line, pos, alias_path, error)) {
+        return false;
+    }
+
+    while (pos < line.size() && std::isspace(static_cast<unsigned char>(line[pos])) != 0) {
+        ++pos;
+    }
+
+    if (pos >= line.size() || line[pos] != '"') {
+        error = "canonical path must be quoted";
+        return false;
+    }
+
+    if (!parse_quoted(line, pos, canonical_path, error)) {
+        return false;
+    }
+
+    while (pos < line.size() && std::isspace(static_cast<unsigned char>(line[pos])) != 0) {
+        ++pos;
+    }
+
+    if (pos < line.size()) {
+        error = "extra content after canonical path";
+        return false;
+    }
+
+    return true;
+}
+
 bool parse_layout(std::istream& in, Layout& out, std::string& error) {
     Layout parsed;
     std::string line;
@@ -258,6 +304,13 @@ bool parse_layout(std::istream& in, Layout& out, std::string& error) {
             }
             s.atlas_index = static_cast<int>(parsed.atlases.size()) - 1;
             parsed.sprites.push_back(s);
+        } else if (line.starts_with("alias")) {
+            std::string alias_path, canonical_path;
+            if (!parse_alias_line(line, alias_path, canonical_path, error)) {
+                error = "Invalid alias line: " + error;
+                return false;
+            }
+            parsed.aliases.push_back({alias_path, canonical_path});
         } else if (line.starts_with("path") || line.starts_with("- marker") || line.starts_with("- frame") || line.starts_with("animation") || line.starts_with("fps")) {
             // These lines are valid in the combined raw layout format but not needed for basic layout parsing
             continue;

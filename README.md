@@ -223,6 +223,7 @@ Profile definitions are searched in:
 - `--trim-transparent`: Remove empty borders to save space.
 - `--rotate`: Allow 90-degree rotation during packing for tighter layouts.
 - `--multipack`: Enable multi-atlas candidate search and splitting.
+- `--deduplicate`: Hash-detect identical sprites and create aliases (saves atlas space).
 - `--sort name|none`: Order of sprites in layout (default: `name` for folders, `none` for stdin).
 - `--scale F`: Pre-scale images (0.0 to 1.0).
 - `--threads N`: Parallelize the packing search.
@@ -230,6 +231,27 @@ Profile definitions are searched in:
 
 ### Layout Caching
 `spratlayout` automatically caches image metadata in the system temp directory. If your source images haven't changed, subsequent runs will be nearly instantaneous. Entries older than one hour are pruned automatically.
+
+### Duplicate Detection
+Detect and alias identical sprites to save atlas space. When `--deduplicate` is used, `spratlayout` computes a content hash of each image and creates aliases for duplicates, packing only one canonical copy per unique content.
+
+```sh
+# Generate layout with duplicate detection
+./build/spratlayout ./frames --deduplicate > layout.txt
+```
+
+The layout file will contain `alias` lines for duplicates:
+```
+sprite "original.png" 0,0 32,32
+alias "duplicate.png" "original.png"
+```
+
+When converting to JSON/metadata, aliases are expanded:
+```sh
+./build/spratlayout ./frames --deduplicate | ./build/spratconvert --transform json > layout.json
+```
+
+The output JSON will reference the canonical sprite path in the `alias_of` field for duplicate entries. This feature is especially useful for large asset collections with repeated sprites, reducing both atlas size and build time.
 
 ---
 
@@ -334,6 +356,50 @@ Allows 90-degree clockwise rotation of sprites to achieve even tighter packing.
 ```
 ![rotation](README-assets/rotation_pad2.png)
 
+## Complete Optimization Workflow
+
+Here's an example combining multiple features for maximum optimization:
+
+```sh
+# 1. Generate layout with deduplication and trimming
+./build/spratlayout ./frames \
+  --deduplicate \
+  --trim-transparent \
+  --padding 2 \
+  --extrude 1 \
+  --multipack \
+  > layout.txt
+
+# 2. Pack with artifact reduction (dilation) and zopfli compression
+./build/spratpack \
+  --dilate 1 \
+  --zopfli \
+  --frame-lines \
+  < layout.txt > spritesheet.png
+
+# 3. Generate metadata for game engine
+./build/spratconvert \
+  --transform json \
+  --auto-animations \
+  < layout.txt > layout.json
+```
+
+This pipeline:
+- Removes duplicate sprites (saves atlas space)
+- Trims transparent borders (reduces pixel bloat)
+- Adds safe padding/extrusion (prevents sampling artifacts)
+- Enables dilation (bleeds colors to prevent halos)
+- Compresses with Zopfli (smallest possible file)
+- Generates game-ready metadata with animations
+
+For GPU-native compression (when libsquish is available):
+```sh
+./build/spratlayout ./frames --deduplicate --trim-transparent --padding 2 | \
+./build/spratpack --dilate 1 --gpu-compress dxt5 > atlas.dds
+```
+
+---
+
 ## Advanced Packing (`spratpack`)
 
 ### Zopfli Compression
@@ -348,6 +414,33 @@ Protect your assets with basic XOR-based obfuscation.
 ./build/spratpack --protect < layout.txt > protected.png
 ```
 `spratunpack` and other tools in the suite automatically handle de-obfuscation when they detect the "SPRAT!" signature.
+
+### Artifact Reduction (Dilation)
+Prevent dark halos around sprites in GPU bilinear filtering by bleeding opaque pixel colors into adjacent transparent pixels.
+```sh
+# Single pass dilation
+./build/spratpack --dilate 1 < layout.txt > dilated.png
+
+# Multiple passes for stronger effect
+./build/spratpack --dilate 2 < layout.txt > dilated.png
+```
+The `--dilate N` flag performs N passes of color dilation around each sprite, filling transparent borders with RGB values from opaque neighbors while keeping alpha at 0. This is essential when using `--extrude` or padding, as GPU sampling can pull transparent pixels at edges.
+
+### Hardware Texture Compression
+Compress atlases to GPU-native DXT formats (requires libsquish library).
+```sh
+# Compress to DXT1 (RGB, best compression)
+./build/spratpack --gpu-compress dxt1 < layout.txt > atlas.dds
+
+# Compress to DXT5 (RGBA with alpha channel)
+./build/spratpack --gpu-compress dxt5 < layout.txt > atlas.dds
+```
+DXT/BC compression provides 4:1 or 6:1 compression ratios and loads directly into GPU memory without decompression. Atlas dimensions must be multiples of 4 for DXT compatibility. Requires libsquish:
+- **Ubuntu/Debian**: `apt install libsquish-dev`
+- **macOS**: `brew install squish`
+- **Windows** (vcpkg): `squish` package in `vcpkg.json`
+
+When libsquish is not available, `--gpu-compress` will error with a helpful message.
 
 ### Per-sprite Dithering & Quantization
 Advanced users can manually edit `layout.txt` to apply per-sprite effects.
@@ -618,26 +711,29 @@ Sample asset source used in this page: https://opengameart.org/content/the-robot
 
 ## Texture Optimization References
 
-Shape and layout:
-
+### Shape and Layout
 - https://en.wikipedia.org/wiki/Texture_atlas (texture atlas overview)
 - https://github.com/juj/RectangleBinPack (MaxRects and related bin-packing approaches)
 - https://www.khronos.org/opengl/wiki/Texture (mipmaps, filtering, and texture behavior)
 
-Color formats and precision:
-
+### Color Formats and Precision
 - https://www.khronos.org/opengl/wiki/Image_Format (normalized, integer, float, and sRGB formats)
 - https://learn.microsoft.com/windows/win32/direct3ddds/dx-graphics-dds-pguide (DDS format/container guidance)
 
-Compression formats:
-
+### Compression Formats
 - https://www.khronos.org/opengl/wiki/S3_Texture_Compression (S3TC/BC-style compression in OpenGL)
 - https://learn.microsoft.com/windows/win32/direct3d11/texture-block-compression-in-direct3d-11 (BC1-BC7 overview and tradeoffs)
+- https://github.com/niltonvolpato/python-libsquish (libsquish Python bindings, background on DXT algorithm)
+- https://www.khronos.org/opengl/wiki/ASTC_Encode (ASTC encoding reference; similar to DXT but more flexible)
 
-Sampling artifacts and alpha:
-
+### Sampling Artifacts and Alpha
 - https://learnopengl.com/Advanced-OpenGL/Blending (alpha blending behavior)
 - https://learnopengl.com/Advanced-OpenGL/Anti-Aliasing (sampling and edge artifacts)
+- https://nvidia-developer-blogs.medium.com/alpha-blending-state-of-the-art-b77579460127 (modern alpha blending best practices)
+
+### Asset Deduplication
+- https://en.wikipedia.org/wiki/Content-addressable_storage (content hashing and deduplication principles)
+- https://isthe.com/chongo/tech/comp/fnv/ (FNV-1a hash function used in sprat-cli)
 
 Platform and engine guidance:
 
