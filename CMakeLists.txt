@@ -262,6 +262,7 @@ add_library(spratcore STATIC
 target_include_directories(spratcore PUBLIC src)
 target_include_directories(spratcore SYSTEM PRIVATE ${STB_DIR})
 target_include_directories(spratcore PRIVATE ${LIBARCHIVE_INCLUDE_DIRS})
+target_link_libraries(spratcore PRIVATE ${LIBARCHIVE_LIBRARIES})
 if(SPRAT_GETTEXT_AVAILABLE)
     target_compile_definitions(spratcore PUBLIC SPRAT_ENABLE_GETTEXT)
     target_link_libraries(spratcore PUBLIC ${SPRAT_INTL_LIBRARIES})
