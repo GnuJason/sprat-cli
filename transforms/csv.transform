@@ -36,8 +36,8 @@ marker,{{marker_index}},{{marker_name}},{{marker_type}},{{marker_x}},{{marker_y}
 [markers_separator]
 [/markers_separator]
 
-[if_animations]
-[/if_animations]
+[if has_animations="true"]
+[/if]
 
 # animations
 

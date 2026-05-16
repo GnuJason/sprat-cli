@@ -247,7 +247,10 @@ Split into multiple atlases if they don't fit in the specified max dimensions.
 Order of sprites in layout. Default: \fBname\fR for folders, \fBnone\fR for list/stdin.
 .TP
 \fB\-\-threads\fR \fIN\fR
-Worker thread count for packing. Default: auto.
+Number of worker threads used during compact-mode packing (\fB\-\-preset quality\fR or \fB\-\-preset small\fR).
+Has no effect when using \fBfast\fR or \fBpot\fR presets.
+Defaults to the number of logical CPU cores reported by the OS.
+Set to \fB1\fR to force single-threaded packing, which is useful for reproducible benchmarks or when memory is constrained.
 .TP
 \fB\-\-debug\fR
 Enable detailed error reporting and debug visualization.
@@ -260,7 +263,7 @@ Config keys available per profile section:
 .IP "\(bu" 2
 \fBmax_width\fR, \fBmax_height\fR
 .IP "\(bu" 2
-\fBpadding\fR, \fBmax_combinations\fR
+\fBpadding\fR
 .IP "\(bu" 2
 \fBscale\fR (\fB0 < scale <= 1\fR), \fBtrim_transparent\fR, \fBthreads\fR, \fBmultipack\fR
 .SS spratpack

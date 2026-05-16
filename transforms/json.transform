@@ -62,10 +62,10 @@ extension=.json
 [if_markers]
 [/if_markers]
 
-[if_animations]
+[if has_animations="true"]
 ,
   "animations": [
-[/if_animations]
+[/if]
 
 [animations]
   [animation]
@@ -81,8 +81,8 @@ extension=.json
   ]
 [/animations_footer]
 
-[if_no_animations]
-[/if_no_animations]
+[if has_animations="false"]
+[/if]
 
 [footer]
 }

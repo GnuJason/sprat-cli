@@ -60,9 +60,9 @@ extension=.xml
 [if_markers]
 [/if_markers]
 
-[if_animations]
+[if has_animations="true"]
   <animations>
-[/if_animations]
+[/if]
 
 [animations]
   [animation]

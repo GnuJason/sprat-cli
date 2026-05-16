@@ -283,6 +283,7 @@ std::string filter_sections_by_attr(const std::string& input,
         std::string tag;
         std::string attr;
         std::string value;
+        bool negated = false;
         size_t i = 0;
         while (i < header.size() && !std::isspace(static_cast<unsigned char>(header[i]))) {
             tag.push_back(header[i]);
@@ -293,10 +294,14 @@ std::string filter_sections_by_attr(const std::string& input,
                 ++i;
             }
             size_t name_start = i;
-            while (i < header.size() && header[i] != '=' && !std::isspace(static_cast<unsigned char>(header[i]))) {
+            while (i < header.size() && header[i] != '=' && header[i] != '!' && !std::isspace(static_cast<unsigned char>(header[i]))) {
                 ++i;
             }
             std::string attr_name = header.substr(name_start, i - name_start);
+            if (i < header.size() && header[i] == '!') {
+                negated = true;
+                ++i;
+            }
             while (i < header.size() && header[i] != '=') {
                 ++i;
             }
@@ -317,11 +322,9 @@ std::string filter_sections_by_attr(const std::string& input,
             }
             std::string attr_value = header.substr(value_start, i - value_start);
             ++i;
-            if (attr_name == "type" || attr_name == "marker_type") {
-                attr = attr_name;
-                value = attr_value;
-                break;
-            }
+            attr = attr_name;
+            value = attr_value;
+            break;
         }
         size_t close = input.find("[/" + tag + "]", header_end + 1);
         if (close == std::string::npos) {
@@ -331,10 +334,12 @@ std::string filter_sections_by_attr(const std::string& input,
         bool keep = true;
         if (!attr.empty()) {
             if (attr == "type") {
-                keep = (value == encoding_name);
+                bool matches = (value == encoding_name);
+                keep = negated ? !matches : matches;
             } else {
                 auto it = vars.find(attr);
-                keep = (it != vars.end() && it->second == value);
+                bool matches = (it != vars.end() && it->second == value);
+                keep = negated ? !matches : matches;
             }
         }
         if (!keep) {
@@ -848,13 +853,8 @@ bool parse_transform_file(const fs::path& path, Transform& out, std::string& err
 
     Transform parsed;
     std::vector<std::string> section_stack;
+    std::vector<std::string> close_tag_names;
     std::string line;
-    std::string legacy_sprite_block;
-    std::string legacy_marker_block;
-    std::string legacy_animation_block;
-    bool saw_sprite_item = false;
-    bool saw_marker_item = false;
-    bool saw_animation_item = false;
 
     auto append_line = [&](std::string& target, const std::string& value) {
         if (!target.empty()) {
@@ -892,6 +892,7 @@ bool parse_transform_file(const fs::path& path, Transform& out, std::string& err
             || s == "atlas"
             || s == "atlas_separator"
             || s == "atlas_footer"
+            || s == "if"
             || s == "footer";
     };
 
@@ -911,8 +912,9 @@ bool parse_transform_file(const fs::path& path, Transform& out, std::string& err
             std::string full_tag = trim_copy(trimmed.substr(1, trimmed.size() - 2));
             if (!full_tag.empty() && full_tag.front() == '/') {
                 std::string tag = trim_copy(full_tag.substr(1));
-                if (is_known_section(tag) && !section_stack.empty() && tag == section_stack.back()) {
+                if (is_known_section(tag) && !section_stack.empty() && tag == close_tag_names.back()) {
                     section_stack.pop_back();
+                    close_tag_names.pop_back();
                     section_tag = true;
                     dsl_mode = false;
                 }
@@ -926,32 +928,52 @@ bool parse_transform_file(const fs::path& path, Transform& out, std::string& err
                 }
                 
                 if (is_known_section(tag)) {
-                    // Only treat as a section if there are no attributes
                     if (space_pos == std::string::npos) {
-                        if (tag == "sprite") {
-                            if (section_stack.empty() || (section_stack.back() != "sprites" && section_stack.back() != "atlas")) {
-                                // Auto-open sprites if sprite is used without it
-                                section_stack.push_back("sprites");
-                            }
-                            saw_sprite_item = true;
-                        } else if (tag == "marker") {
-                            if (section_stack.empty() || section_stack.back() != "markers") {
-                                section_stack.push_back("markers");
-                            }
-                            saw_marker_item = true;
-                        } else if (tag == "animation") {
-                            if (section_stack.empty() || section_stack.back() != "animations") {
-                                section_stack.push_back("animations");
-                            }
-                            saw_animation_item = true;
-                        } else if (tag == "atlas") {
-                            if (section_stack.empty() || section_stack.back() != "atlases") {
-                                section_stack.push_back("atlases");
-                            }
-                        }
                         section_stack.push_back(tag);
+                        close_tag_names.push_back(tag);
                         section_tag = true;
                         dsl_mode = false;
+                    } else if (tag == "if") {
+                        std::string rest = full_tag.substr(space_pos + 1);
+                        std::string if_attr, if_op, if_val;
+                        size_t eq_pos = rest.find('=');
+                        if (eq_pos != std::string::npos) {
+                            if (eq_pos > 0 && rest[eq_pos - 1] == '!') {
+                                if_op = "!=";
+                                if_attr = trim_copy(rest.substr(0, eq_pos - 1));
+                            } else {
+                                if_op = "=";
+                                if_attr = trim_copy(rest.substr(0, eq_pos));
+                            }
+                            size_t vstart = rest.find('"', eq_pos);
+                            if (vstart != std::string::npos) {
+                                size_t vend = rest.find('"', vstart + 1);
+                                if (vend != std::string::npos) {
+                                    if_val = rest.substr(vstart + 1, vend - vstart - 1);
+                                }
+                            }
+                        }
+                        static const std::map<std::pair<std::string,std::string>, std::string> cond_map = {
+                            {{"has_markers",    "true"},  "if_markers"},
+                            {{"has_markers",    "false"}, "if_no_markers"},
+                            {{"has_animations", "true"},  "if_animations"},
+                            {{"has_animations", "false"}, "if_no_animations"},
+                        };
+                        std::string resolved;
+                        if (if_op == "=") {
+                            auto it = cond_map.find({if_attr, if_val});
+                            if (it != cond_map.end()) resolved = it->second;
+                        } else if (if_op == "!=") {
+                            std::string flipped = (if_val == "true") ? "false" : "true";
+                            auto it = cond_map.find({if_attr, flipped});
+                            if (it != cond_map.end()) resolved = it->second;
+                        }
+                        if (!resolved.empty()) {
+                            section_stack.push_back(resolved);
+                            close_tag_names.push_back("if");
+                            section_tag = true;
+                            dsl_mode = false;
+                        }
                     }
                 }
             }
@@ -973,20 +995,21 @@ bool parse_transform_file(const fs::path& path, Transform& out, std::string& err
                             if (subcmd == "sprite") {
                                 if (section_stack.empty() || section_stack.back() != "sprites") {
                                     section_stack.push_back("sprites");
+                                    close_tag_names.push_back("sprites");
                                 }
-                                saw_sprite_item = true;
                             } else if (subcmd == "marker") {
                                 if (section_stack.empty() || section_stack.back() != "markers") {
                                     section_stack.push_back("markers");
+                                    close_tag_names.push_back("markers");
                                 }
-                                saw_marker_item = true;
                             } else if (subcmd == "animation") {
                                 if (section_stack.empty() || section_stack.back() != "animations") {
                                     section_stack.push_back("animations");
+                                    close_tag_names.push_back("animations");
                                 }
-                                saw_animation_item = true;
                             }
                             section_stack.push_back(subcmd);
+                            close_tag_names.push_back(subcmd);
                             continue;
                         }
                     }
@@ -994,6 +1017,7 @@ bool parse_transform_file(const fs::path& path, Transform& out, std::string& err
                     // Start section
                     dsl_mode = true;
                     section_stack.push_back(cmd);
+                    close_tag_names.push_back(cmd);
                     
                     // If it's meta, we might have arguments on the same line
                     if (cmd == "meta") {
@@ -1042,22 +1066,28 @@ bool parse_transform_file(const fs::path& path, Transform& out, std::string& err
 
                             while (!section_stack.empty() && section_stack.back() != parent && !parent.empty()) {
                                 section_stack.pop_back();
+                                close_tag_names.pop_back();
                             }
-                            if (section_stack.empty() && !parent.empty()) section_stack.push_back(parent);
-                            if (subcmd == "sprite") saw_sprite_item = true;
-                            else if (subcmd == "marker") saw_marker_item = true;
-                            else if (subcmd == "animation") saw_animation_item = true;
+                            if (section_stack.empty() && !parent.empty()) {
+                                section_stack.push_back(parent);
+                                close_tag_names.push_back(parent);
+                            }
                             section_stack.push_back(subcmd);
+                            close_tag_names.push_back(subcmd);
                             continue;
                         } else {
-                            while (!section_stack.empty()) section_stack.pop_back();
+                            section_stack.clear();
+                            close_tag_names.clear();
                             section_stack.push_back(subcmd);
+                            close_tag_names.push_back(subcmd);
                             continue;
                         }
                     }
                 } else if (is_known_section(cmd)) {
-                    while (!section_stack.empty()) section_stack.pop_back();
+                    section_stack.clear();
+                    close_tag_names.clear();
                     section_stack.push_back(cmd);
+                    close_tag_names.push_back(cmd);
                     if (cmd == "meta") {
                         std::string rest;
                         if (std::getline(liss, rest)) {
@@ -1110,16 +1140,12 @@ bool parse_transform_file(const fs::path& path, Transform& out, std::string& err
             append_line(parsed.if_no_markers, line);
         } else if (section == "markers_header") {
             append_line(parsed.markers_header, line);
-        } else if (section == "markers") {
-            append_line(legacy_marker_block, line);
         } else if (section == "marker") {
             append_line(parsed.markers, line);
         } else if (section == "markers_separator") {
             append_line(parsed.markers_separator, line);
         } else if (section == "markers_footer") {
             append_line(parsed.markers_footer, line);
-        } else if (section == "sprites") {
-            append_line(legacy_sprite_block, line);
         } else if (section == "sprite") {
             append_line(parsed.sprite, line);
         } else if (section == "sprite_markers_header") {
@@ -1138,8 +1164,6 @@ bool parse_transform_file(const fs::path& path, Transform& out, std::string& err
             append_line(parsed.if_no_animations, line);
         } else if (section == "animations_header") {
             append_line(parsed.animations_header, line);
-        } else if (section == "animations") {
-            append_line(legacy_animation_block, line);
         } else if (section == "animation") {
             append_line(parsed.animations, line);
         } else if (section == "animations_separator") {
@@ -1161,6 +1185,7 @@ bool parse_transform_file(const fs::path& path, Transform& out, std::string& err
 
     if (dsl_mode) {
         section_stack.clear();
+        close_tag_names.clear();
     }
 
     if (!section_stack.empty()) {
@@ -1168,21 +1193,11 @@ bool parse_transform_file(const fs::path& path, Transform& out, std::string& err
         return false;
     }
 
-    if (!saw_sprite_item) {
-        parsed.sprite = legacy_sprite_block;
-    }
-    if (!saw_marker_item) {
-        parsed.markers = legacy_marker_block;
-    }
-    if (!saw_animation_item) {
-        parsed.animations = legacy_animation_block;
-    }
-
     if (parsed.name.empty()) {
         parsed.name = path.stem().string();
     }
     if (parsed.sprite.empty()) {
-        error = "Transform missing [sprite] section (or legacy [sprites] body): " + path.string();
+        error = "Transform missing [sprite] section: " + path.string();
         return false;
     }
 

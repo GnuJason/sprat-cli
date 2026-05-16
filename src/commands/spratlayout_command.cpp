@@ -50,6 +50,8 @@ namespace fs = std::filesystem;
 #include <unordered_map>
 #include <unordered_set>
 #include <optional>
+#include <numeric>
+#include <cstring>
 #include <system_error>
 #include <archive.h>
 #include <archive_entry.h>
@@ -97,7 +99,6 @@ struct ProfileDefinition {
     std::optional<int> max_height;
     std::optional<int> padding;
     std::optional<int> extrude;
-    std::optional<int> max_combinations;
     std::optional<double> scale;
     std::optional<bool> trim_transparent;
     std::optional<bool> rotate;
@@ -116,7 +117,6 @@ constexpr Mode k_default_mode = Mode::FAST;
 constexpr OptimizeTarget k_default_optimize_target = OptimizeTarget::GPU;
 constexpr int k_default_padding = 0;
 constexpr int k_default_extrude = 0;
-constexpr int k_default_max_combinations = 0;
 constexpr double k_default_scale = 1.0;
 constexpr bool k_default_trim_transparent = false;
 constexpr unsigned int k_default_threads = 0;
@@ -142,9 +142,9 @@ constexpr size_t k_ustar_sig_required_len = k_tar_magic_offset + 6;
 constexpr int k_floating_point_precision = 17;
 constexpr int k_search_step_divisor = 24;
 constexpr int k_search_step_min = 8;
-constexpr size_t k_guided_offsets_count = 11;
+constexpr size_t k_guided_offsets_count = 15;
 constexpr std::array<int, k_guided_offsets_count> k_guided_search_offsets = {
-    0, -1, 1, -2, 2, -4, 4, -8, 8, -12, 12
+    0, -1, 1, -2, 2, -4, 4, -8, 8, -12, 12, -16, 16, -20, 20
 };
 constexpr size_t k_sort_mode_count = 6;
 constexpr size_t k_sort_mode_index_area = 0;
@@ -161,7 +161,7 @@ enum class RectHeuristic : std::uint8_t {
 };
 
 constexpr size_t k_rect_heuristic_count = 3;
-constexpr size_t k_guided_anchor_count = 3;
+constexpr size_t k_guided_anchor_count = 4;
 constexpr size_t k_guided_sort_mode_count = 4;
 constexpr std::array<size_t, k_guided_sort_mode_count> k_guided_sort_indices = {
     k_sort_mode_index_height,
@@ -169,10 +169,11 @@ constexpr std::array<size_t, k_guided_sort_mode_count> k_guided_sort_indices = {
     k_sort_mode_index_maxside,
     k_sort_mode_index_none
 };
-constexpr size_t k_guided_heuristic_count = 2;
+constexpr size_t k_guided_heuristic_count = 3;
 constexpr std::array<RectHeuristic, k_guided_heuristic_count> k_guided_heuristics = {
     RectHeuristic::BestShortSideFit,
-    RectHeuristic::BestAreaFit
+    RectHeuristic::BestAreaFit,
+    RectHeuristic::BottomLeft
 };
 constexpr long long k_cache_max_age_seconds = 3600;
 constexpr size_t k_cache_max_layout_files = 16;
@@ -222,6 +223,32 @@ bool parse_optimize_target_from_string(const std::string& value, OptimizeTarget&
         return true;
     }
     error = "invalid optimize target '" + value + "'";
+    return false;
+}
+
+struct PresetDefinition {
+    Mode mode;
+    OptimizeTarget optimize_target;
+};
+
+bool parse_preset_from_string(const std::string& value, PresetDefinition& out) {
+    std::string lower = to_lower_copy(value);
+    if (lower == "fast") {
+        out = {Mode::FAST, OptimizeTarget::GPU};
+        return true;
+    }
+    if (lower == "quality") {
+        out = {Mode::COMPACT, OptimizeTarget::GPU};
+        return true;
+    }
+    if (lower == "small") {
+        out = {Mode::COMPACT, OptimizeTarget::SPACE};
+        return true;
+    }
+    if (lower == "pot") {
+        out = {Mode::POT, OptimizeTarget::GPU};
+        return true;
+    }
     return false;
 }
 
@@ -444,13 +471,6 @@ bool parse_profiles_config(std::istream& input,
                 return false;
             }
             current->extrude = parsed_extrude;
-        } else if (lower_key == "max_combinations") {
-            int parsed_max_combinations = 0;
-            if (!parse_non_negative_int(value, parsed_max_combinations)) {
-                error = "invalid max_combinations '" + value + "' at line " + std::to_string(line_number);
-                return false;
-            }
-            current->max_combinations = parsed_max_combinations;
         } else if (lower_key == "scale") {
             double parsed_scale = 0.0;
             if (!parse_scale_factor(value, parsed_scale)) {
@@ -636,7 +656,8 @@ struct ImageCacheEntry {
     int trim_right = 0;
     int trim_bottom = 0;
     long long cached_at_unix = 0;
-    uint64_t content_hash = 0;  // FNV-1a hash of raw RGBA buffer (0 if not computed)
+    uint64_t content_hash = 0;     // FNV-1a hash of visible pixel region (0 = not computed)
+    uint64_t perceptual_hash = 0;  // dHash of visible pixel region   (0 = not computed)
 };
 
 struct LayoutCandidate {
@@ -1207,7 +1228,7 @@ bool load_image_cache(const fs::path& cache_path,
     if (!(in >> header_tag >> version)) {
         return false;
     }
-    if (header_tag != "spratlayout_cache" || (version != 1 && version != 2)) {
+    if (header_tag != "spratlayout_cache" || (version != 1 && version != 2 && version != 3)) {
         return false;
     }
 
@@ -1228,8 +1249,13 @@ bool load_image_cache(const fs::path& cache_path,
                  >> entry.trim_bottom)) {
             break;
         }
-        if (version == 2) {
+        if (version >= 2) {
             if (!(in >> entry.cached_at_unix)) {
+                break;
+            }
+        }
+        if (version >= 3) {
+            if (!(in >> entry.content_hash >> entry.perceptual_hash)) {
                 break;
             }
         }
@@ -1258,7 +1284,7 @@ bool save_image_cache(const fs::path& cache_path,
         return false;
     }
 
-    out << "spratlayout_cache 2\n";
+    out << "spratlayout_cache 3\n";
     for (const auto& kv : entries) {
         std::string path = kv.first;
         if (path.size() > 2 &&
@@ -1280,7 +1306,9 @@ bool save_image_cache(const fs::path& cache_path,
             << e.trim_top << " "
             << e.trim_right << " "
             << e.trim_bottom << " "
-            << e.cached_at_unix << "\n";
+            << e.cached_at_unix << " "
+            << e.content_hash << " "
+            << e.perceptual_hash << "\n";
     }
     out.close();
     if (!out) {
@@ -1371,18 +1399,23 @@ void print_usage() {
               << tr("Scan an image folder/list/tar and write a text layout to standard output.\n")
               << tr("Rotated sprites are emitted with a trailing 'rotated' token.\n")
               << tr("\n")
+              << tr("Presets (recommended starting point):\n")
+              << tr("  --preset fast              Quick shelf packing, GPU-friendly dimensions\n")
+              << tr("  --preset quality           Best packing quality, GPU-friendly dimensions\n")
+              << tr("  --preset small             Best packing quality, smallest possible area\n")
+              << tr("  --preset pot               Power-of-two atlas, GPU-friendly dimensions\n")
+              << tr("\n")
               << tr("Options:\n")
               << tr("  --profile NAME             Profile name from config (default: fast)\n")
               << tr("  --profiles-config PATH     Use an explicit profile configuration file\n")
-              << tr("  --mode MODE                Packing mode: compact, pot, or fast\n")
-              << tr("  --optimize TARGET          Optimization target: gpu or space\n")
+              << tr("  --mode MODE                Packing algorithm: compact, pot, or fast\n")
+              << tr("  --optimize TARGET          Optimization metric: gpu (min max-side) or space (min area)\n")
               << tr("  --max-width N              Maximum atlas width\n")
               << tr("  --max-height N             Maximum atlas height\n")
               << tr("  --no-max-width             Disable width limit (even if profile sets one)\n")
               << tr("  --no-max-height            Disable height limit (even if profile sets one)\n")
               << tr("  --padding N                Extra pixels between packed sprites\n")
               << tr("  --extrude N                Repeat edge pixels N times (padding should be >= extrude * 2)\n")
-              << tr("  --max-combinations N       Max combinations for compact search (0=auto)\n")
               << tr("  --source-resolution WxH    Source design resolution baseline\n")
               << tr("  --target-resolution WxH    Target output resolution\n")
               << tr("  --resolution-reference REF Axis ratio driver: largest or smallest\n")
@@ -1425,7 +1458,6 @@ std::string build_layout_signature(const std::string& profile_name,
                                    int max_height_limit,
                                    int padding,
                                    int extrude,
-                                   int max_combinations,
                                    double scale,
                                    bool trim_transparent,
                                    bool allow_rotate,
@@ -1465,8 +1497,6 @@ std::string build_layout_signature(const std::string& profile_name,
     sig += '|';
     sig += std::to_string(extrude);
     sig += '|';
-    sig += std::to_string(max_combinations);
-    sig += '|';
     sig += scale_buf.data();
     sig += '|';
     sig += (trim_transparent ? '1' : '0');
@@ -1489,7 +1519,6 @@ std::string build_layout_seed_signature(const std::string& profile_name,
                                         int max_width_limit,
                                         int max_height_limit,
                                         int extrude,
-                                        int max_combinations,
                                         double scale,
                                         bool trim_transparent,
                                         bool allow_rotate,
@@ -1525,8 +1554,6 @@ std::string build_layout_seed_signature(const std::string& profile_name,
     sig += std::to_string(max_height_limit);
     sig += '|';
     sig += std::to_string(extrude);
-    sig += '|';
-    sig += std::to_string(max_combinations);
     sig += '|';
     sig += scale_buf.data();
     sig += '|';
@@ -1993,7 +2020,8 @@ std::string build_layout_output_text(const std::vector<Atlas>& atlases,
                                      bool multipack,
                                      const std::vector<Sprite>& sprites,
                                      const std::vector<std::pair<std::string, std::string>>& aliases,
-                                     bool debug) {
+                                     bool debug,
+                                     const fs::path& root) {
     std::ostringstream output;
     if (debug) {
         output << "# Sprat Layout Debug Info\n";
@@ -2003,6 +2031,7 @@ std::string build_layout_output_text(const std::vector<Atlas>& atlases,
         output << "# Aliases: " << aliases.size() << "\n";
         output << "# Multipack: " << (multipack ? "true" : "false") << "\n";
     }
+    output << "root " << to_quoted(root.string()) << "\n";
     output << "scale " << std::setprecision(k_output_precision) << scale << "\n";
     if (extrude > 0) {
         output << "extrude " << extrude << "\n";
@@ -2022,7 +2051,9 @@ std::string build_layout_output_text(const std::vector<Atlas>& atlases,
         output << "atlas " << atlases[i].width << "," << atlases[i].height << "\n";
         for (size_t si : sprites_by_atlas[i]) {
             const auto& s = sprites[si];
-            std::string path = s.path;
+            fs::path sprite_path(s.path);
+            fs::path relative_path = fs::relative(sprite_path, root);
+            std::string path = relative_path.string();
             // Standardize path separators to forward slashes for output consistency
             std::replace(path.begin(), path.end(), '\\', '/');
             output << "sprite " << to_quoted(path) << " "
@@ -2039,9 +2070,17 @@ std::string build_layout_output_text(const std::vector<Atlas>& atlases,
         }
     }
     for (const auto& alias_pair : aliases) {
-        const auto& alias_path = alias_pair.first;
-        const auto& canonical_path = alias_pair.second;
-        output << "alias " << to_quoted(alias_path) << " " << to_quoted(canonical_path) << "\n";
+        fs::path alias_fs_path(alias_pair.first);
+        fs::path relative_alias_path = fs::relative(alias_fs_path, root);
+        std::string alias_str = relative_alias_path.string();
+        std::replace(alias_str.begin(), alias_str.end(), '\\', '/');
+
+        fs::path canonical_fs_path(alias_pair.second);
+        fs::path relative_canonical_path = fs::relative(canonical_fs_path, root);
+        std::string canonical_str = relative_canonical_path.string();
+        std::replace(canonical_str.begin(), canonical_str.end(), '\\', '/');
+
+        output << "alias " << to_quoted(alias_str) << " " << to_quoted(canonical_str) << "\n";
     }
     return output.str();
 }
@@ -2887,6 +2926,9 @@ bool pack_atlases(
                 if (candidate.packed_count != best.packed_count) {
                     return candidate.packed_count > best.packed_count;
                 }
+                if (candidate.packed_area != best.packed_area) {
+                    return candidate.packed_area > best.packed_area;
+                }
                 return pick_better_layout_candidate(
                     candidate.area, candidate.used_w, candidate.used_h, true,
                     best.area, best.used_w, best.used_h,
@@ -2971,6 +3013,45 @@ bool pack_atlases(
     return true;
 }
 
+// Maximum allowed Hamming distance between two dHashes to consider sprites perceptually equal.
+static constexpr int k_dhash_threshold = 5;
+
+// Compute a 64-bit dHash for an RGBA pixel buffer.
+// Algorithm: sample a 9x8 greyscale grid (nearest-neighbor), then for each of the 8 rows
+// compare 8 adjacent column pairs; bit=1 if left < right. Returns 64-bit hash.
+// Alpha-premultiplied luma: grey = (0.299*R + 0.587*G + 0.114*B) * (A/255.0)
+static uint64_t compute_dhash(const unsigned char* rgba, int w, int h) {
+    if (rgba == nullptr || w <= 0 || h <= 0) {
+        return 0;
+    }
+    // Sample a 9x8 grid (9 cols, 8 rows)
+    double grid[8][9];
+    for (int row = 0; row < 8; ++row) {
+        for (int col = 0; col < 9; ++col) {
+            int px = (col * (w - 1)) / 8;
+            int py = (row * (h - 1)) / 7;
+            if (px < 0) px = 0;
+            if (px >= w) px = w - 1;
+            if (py < 0) py = 0;
+            if (py >= h) py = h - 1;
+            const unsigned char* p = rgba + (static_cast<size_t>(py) * static_cast<size_t>(w) + static_cast<size_t>(px)) * 4;
+            double a = p[3] / 255.0;
+            grid[row][col] = (0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2]) * a;
+        }
+    }
+    uint64_t hash = 0;
+    int bit = 0;
+    for (int row = 0; row < 8; ++row) {
+        for (int col = 0; col < 8; ++col) {
+            if (grid[row][col] < grid[row][col + 1]) {
+                hash |= (uint64_t(1) << bit);
+            }
+            ++bit;
+        }
+    }
+    return hash;
+}
+
 int run_spratlayout(int argc, char** argv) {
 #ifdef _WIN32
     if (_setmode(_fileno(stdin), _O_BINARY) == -1) {
@@ -2984,6 +3065,8 @@ int run_spratlayout(int argc, char** argv) {
     fs::path folder;
     std::string requested_profile_name;
     std::string profiles_config_path;
+    bool has_preset = false;
+    PresetDefinition preset_definition{Mode::FAST, OptimizeTarget::GPU};
     bool has_mode_override = false;
     Mode mode_override = Mode::COMPACT;
     bool has_optimize_override = false;
@@ -2998,8 +3081,6 @@ int run_spratlayout(int argc, char** argv) {
     bool has_padding_override = false;
     int extrude = 0;
     bool has_extrude_override = false;
-    int max_combinations = 0;
-    bool has_max_combinations_override = false;
     int source_resolution_width = 0;
     int source_resolution_height = 0;
     int target_resolution_width = 0;
@@ -3036,6 +3117,14 @@ int run_spratlayout(int argc, char** argv) {
             debug = true;
         } else if (arg == "--profile" && i + 1 < argc) {
             requested_profile_name = argv[++i];
+        } else if (arg == "--preset" && i + 1 < argc) {
+            std::string value = argv[++i];
+            if (!parse_preset_from_string(value, preset_definition)) {
+                std::cerr << tr("Invalid preset: ") << value
+                          << tr(". Valid presets: fast, quality, small, pot\n");
+                return 1;
+            }
+            has_preset = true;
         } else if (arg == "--profiles-config" && i + 1 < argc) {
             profiles_config_path = argv[++i];
         } else if (arg == "--mode" && i + 1 < argc) {
@@ -3096,13 +3185,6 @@ int run_spratlayout(int argc, char** argv) {
                 return 1;
             }
             has_extrude_override = true;
-        } else if (arg == "--max-combinations" && i + 1 < argc) {
-            std::string value = argv[++i];
-            if (!parse_non_negative_int(value, max_combinations)) {
-                std::cerr << tr("Invalid max combinations value: ") << value << "\n";
-                return 1;
-            }
-            has_max_combinations_override = true;
         } else if (arg == "--source-resolution" && i + 1 < argc) {
             std::string value = argv[++i];
             if (!parse_resolution(value, source_resolution_width, source_resolution_height)) {
@@ -3193,6 +3275,17 @@ int run_spratlayout(int argc, char** argv) {
         selected_profile_name = requested_profile_name;
     }
 
+    if (has_preset) {
+        if (!has_mode_override) {
+            mode_override = preset_definition.mode;
+            has_mode_override = true;
+        }
+        if (!has_optimize_override) {
+            optimize_override = preset_definition.optimize_target;
+            has_optimize_override = true;
+        }
+    }
+
     if (!has_mode_override) {
         mode = k_default_mode;
     } else {
@@ -3208,9 +3301,6 @@ int run_spratlayout(int argc, char** argv) {
     }
     if (!has_extrude_override) {
         extrude = k_default_extrude;
-    }
-    if (!has_max_combinations_override) {
-        max_combinations = k_default_max_combinations;
     }
     if (!has_scale_override) {
         scale = k_default_scale;
@@ -3324,9 +3414,6 @@ int run_spratlayout(int argc, char** argv) {
         }
         if (!has_extrude_override && selected_profile.extrude) {
             extrude = *selected_profile.extrude;
-        }
-        if (!has_max_combinations_override && selected_profile.max_combinations) {
-            max_combinations = *selected_profile.max_combinations;
         }
         if (!has_scale_override && selected_profile.scale) {
             scale = *selected_profile.scale;
@@ -3536,10 +3623,10 @@ int run_spratlayout(int argc, char** argv) {
     const bool is_file = !do_sort;
     const std::string layout_signature = build_layout_signature(
         selected_profile_name, mode, optimize_target, max_width_limit, max_height_limit,
-        padding, extrude, max_combinations, scale, trim_transparent, allow_rotate, is_file, deduplicateMode, sources);
+        padding, extrude, scale, trim_transparent, allow_rotate, is_file, deduplicateMode, sources);
     const std::string layout_seed_signature = build_layout_seed_signature(
         selected_profile_name, mode, optimize_target, max_width_limit, max_height_limit,
-        extrude, max_combinations, scale, trim_transparent, allow_rotate, is_file, sources);
+        extrude, scale, trim_transparent, allow_rotate, is_file, sources);
     const fs::path output_cache_path = build_output_cache_path(cache_path, layout_signature);
     const fs::path seed_cache_path = build_seed_cache_path(cache_path, layout_seed_signature);
     if (!is_file_older_than_seconds(output_cache_path, k_cache_max_age_seconds)) {
@@ -3566,28 +3653,59 @@ int run_spratlayout(int argc, char** argv) {
             if (cached.trim_transparent == trim_transparent &&
                 cached.file_size == meta.file_size &&
                 cached.mtime_ticks == meta.mtime_ticks) {
-                Sprite s;
-                s.path = path;
-                s.w = cached.w;
-                s.h = cached.h;
-                s.trim_left = cached.trim_left;
-                s.trim_top = cached.trim_top;
-                s.trim_right = cached.trim_right;
-                s.trim_bottom = cached.trim_bottom;
-                sprites.push_back(std::move(s));
-                cache_it->second.cached_at_unix = now_unix;
-                continue;
+                // Step 4a: if deduplication is requested and the relevant hash is missing,
+                // fall through to reload so we can compute the hash.
+                bool need_hash = false;
+                if (deduplicateMode == "exact" && cached.content_hash == 0) {
+                    need_hash = true;
+                } else if (deduplicateMode == "perceptual" && cached.perceptual_hash == 0) {
+                    need_hash = true;
+                }
+                if (!need_hash) {
+                    Sprite s;
+                    s.path = path;
+                    s.w = cached.w;
+                    s.h = cached.h;
+                    s.trim_left = cached.trim_left;
+                    s.trim_top = cached.trim_top;
+                    s.trim_right = cached.trim_right;
+                    s.trim_bottom = cached.trim_bottom;
+                    sprites.push_back(std::move(s));
+                    cache_it->second.cached_at_unix = now_unix;
+                    continue;
+                }
             }
         }
 
         Sprite loaded_sprite;
         loaded_sprite.path = path;
         if (!trim_transparent) {
-            int w;
-            int h;
-            int channels;
-            if (stbi_info(path.c_str(), &w, &h, &channels) == 0) {
-                continue;
+            // Step 4b: when deduplication is active, load pixel data to compute hashes.
+            uint64_t entry_content_hash = 0;
+            uint64_t entry_perceptual_hash = 0;
+            int w = 0;
+            int h = 0;
+            if (deduplicateMode != "none") {
+                int channels = 0;
+                unsigned char* px = stbi_load(path.c_str(), &w, &h, &channels, 4);
+                if (px == nullptr) {
+                    continue;
+                }
+                // FNV-1a over the full RGBA buffer
+                const size_t nbytes = static_cast<size_t>(w) * static_cast<size_t>(h) * 4;
+                uint64_t fnv = 14695981039346656037ULL;
+                for (size_t bi = 0; bi < nbytes; ++bi) {
+                    fnv ^= px[bi];
+                    fnv *= 1099511628211ULL;
+                }
+                entry_content_hash = fnv;
+                entry_perceptual_hash = compute_dhash(px, w, h);
+                stbi_image_free(px);
+            } else {
+                int channels = 0;
+                if (stbi_info(path.c_str(), &w, &h, &channels) == 0) {
+                    continue;
+                }
             }
             loaded_sprite.w = w;
             loaded_sprite.h = h;
@@ -3602,7 +3720,9 @@ int run_spratlayout(int argc, char** argv) {
                 .trim_top=loaded_sprite.trim_top,
                 .trim_right=loaded_sprite.trim_right,
                 .trim_bottom=loaded_sprite.trim_bottom,
-                .cached_at_unix=now_unix
+                .cached_at_unix=now_unix,
+                .content_hash=entry_content_hash,
+                .perceptual_hash=entry_perceptual_hash
             };
             continue;
         }
@@ -3620,6 +3740,9 @@ int run_spratlayout(int argc, char** argv) {
         int min_y = 0;
         int max_x = -1;
         int max_y = -1;
+        // Step 4c: compute hashes over trimmed region before freeing pixel data.
+        uint64_t entry_content_hash = 0;
+        uint64_t entry_perceptual_hash = 0;
         if (compute_trim_bounds(data, w, h, min_x, min_y, max_x, max_y)) {
             loaded_sprite.trim_left = min_x;
             loaded_sprite.trim_top = min_y;
@@ -3627,6 +3750,32 @@ int run_spratlayout(int argc, char** argv) {
             loaded_sprite.trim_bottom = (h - 1) - max_y;
             loaded_sprite.w = max_x - min_x + 1;
             loaded_sprite.h = max_y - min_y + 1;
+
+            if (deduplicateMode != "none") {
+                // FNV-1a over the trimmed pixel region
+                uint64_t fnv = 14695981039346656037ULL;
+                for (int ry = min_y; ry <= max_y; ++ry) {
+                    const unsigned char* row = data + (static_cast<size_t>(ry) * static_cast<size_t>(w) + static_cast<size_t>(min_x)) * 4;
+                    for (int rx = 0; rx < (max_x - min_x + 1); ++rx) {
+                        for (int c = 0; c < 4; ++c) {
+                            fnv ^= row[static_cast<size_t>(rx) * 4 + static_cast<size_t>(c)];
+                            fnv *= 1099511628211ULL;
+                        }
+                    }
+                }
+                entry_content_hash = fnv;
+
+                // Extract trimmed region for dHash
+                const int tw = max_x - min_x + 1;
+                const int th = max_y - min_y + 1;
+                std::vector<unsigned char> trimmed(static_cast<size_t>(tw) * static_cast<size_t>(th) * 4);
+                for (int ry = 0; ry < th; ++ry) {
+                    const unsigned char* src = data + (static_cast<size_t>(min_y + ry) * static_cast<size_t>(w) + static_cast<size_t>(min_x)) * 4;
+                    unsigned char* dst = trimmed.data() + static_cast<size_t>(ry) * static_cast<size_t>(tw) * 4;
+                    std::memcpy(dst, src, static_cast<size_t>(tw) * 4);
+                }
+                entry_perceptual_hash = compute_dhash(trimmed.data(), tw, th);
+            }
         } else {
             // Fully transparent image: keep a 1x1 transparent region.
             loaded_sprite.trim_left = 0;
@@ -3635,6 +3784,12 @@ int run_spratlayout(int argc, char** argv) {
             loaded_sprite.trim_bottom = std::max(0, h - 1);
             loaded_sprite.w = 1;
             loaded_sprite.h = 1;
+
+            if (deduplicateMode != "none") {
+                // Sentinel: all fully-transparent sprites are equivalent.
+                entry_content_hash = 0xFFFFFFFFFFFFFFFFULL;
+                entry_perceptual_hash = 0xFFFFFFFFFFFFFFFFULL;
+            }
         }
 
         stbi_image_free(data);
@@ -3649,11 +3804,100 @@ int run_spratlayout(int argc, char** argv) {
             .trim_top=loaded_sprite.trim_top,
             .trim_right=loaded_sprite.trim_right,
             .trim_bottom=loaded_sprite.trim_bottom,
-            .cached_at_unix=now_unix
+            .cached_at_unix=now_unix,
+            .content_hash=entry_content_hash,
+            .perceptual_hash=entry_perceptual_hash
         };
     }
 
     save_image_cache(cache_path, cache_entries);
+
+    // Step 5: Deduplication pass
+    std::vector<std::pair<std::string, std::string>> layout_aliases;
+    if (deduplicateMode == "exact") {
+        // O(N) hash-map dedup keyed by (content_hash, w, h)
+        struct DedupKey {
+            uint64_t hash;
+            int w;
+            int h;
+            bool operator==(const DedupKey& o) const {
+                return hash == o.hash && w == o.w && h == o.h;
+            }
+        };
+        struct DedupKeyHash {
+            size_t operator()(const DedupKey& k) const {
+                size_t h = std::hash<uint64_t>{}(k.hash);
+                h ^= std::hash<int>{}(k.w) + 0x9e3779b9u + (h << 6u) + (h >> 2u);
+                h ^= std::hash<int>{}(k.h) + 0x9e3779b9u + (h << 6u) + (h >> 2u);
+                return h;
+            }
+        };
+        std::unordered_map<DedupKey, std::string, DedupKeyHash> canonical_map;
+        std::vector<Sprite> deduped;
+        deduped.reserve(sprites.size());
+        for (const auto& s : sprites) {
+            const std::string ck = s.path + (trim_transparent ? "|1" : "|0");
+            const auto it = cache_entries.find(ck);
+            const uint64_t h = (it != cache_entries.end()) ? it->second.content_hash : 0;
+            if (h == 0) {
+                deduped.push_back(s);
+                continue;
+            }
+            DedupKey key{h, s.w, s.h};
+            auto [ins_it, inserted] = canonical_map.emplace(key, s.path);
+            if (inserted) {
+                deduped.push_back(s);
+            } else {
+                layout_aliases.push_back({s.path, ins_it->second});
+            }
+        }
+        sprites = std::move(deduped);
+    } else if (deduplicateMode == "perceptual") {
+        // O(N²) pairwise + union-find dedup
+        const size_t N = sprites.size();
+        // Gather hashes
+        std::vector<uint64_t> phash(N, 0);
+        for (size_t i = 0; i < N; ++i) {
+            const std::string ck = sprites[i].path + (trim_transparent ? "|1" : "|0");
+            const auto it = cache_entries.find(ck);
+            if (it != cache_entries.end()) {
+                phash[i] = it->second.perceptual_hash;
+            }
+        }
+        // Union-find
+        std::vector<size_t> parent(N);
+        std::iota(parent.begin(), parent.end(), 0);
+        std::function<size_t(size_t)> find = [&](size_t x) -> size_t {
+            while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; }
+            return x;
+        };
+        for (size_t i = 0; i < N; ++i) {
+            if (phash[i] == 0) continue;
+            for (size_t j = i + 1; j < N; ++j) {
+                if (phash[j] == 0) continue;
+                if (sprites[i].w != sprites[j].w || sprites[i].h != sprites[j].h) continue;
+                if (__builtin_popcountll(phash[i] ^ phash[j]) <= k_dhash_threshold) {
+                    size_t ri = find(i), rj = find(j);
+                    if (ri != rj) parent[rj] = ri;
+                }
+            }
+        }
+        // Build deduped list
+        std::unordered_map<size_t, size_t> canonical_map; // root -> first sprite index
+        canonical_map.reserve(N);
+        std::vector<Sprite> deduped;
+        deduped.reserve(N);
+        for (size_t i = 0; i < N; ++i) {
+            size_t root = find(i);
+            auto [ins_it, inserted] = canonical_map.emplace(root, i);
+            if (inserted) {
+                deduped.push_back(sprites[i]);
+            } else {
+                layout_aliases.push_back({sprites[i].path, sprites[ins_it->second].path});
+            }
+        }
+        sprites = std::move(deduped);
+    }
 
     if (sprites.empty()) {
         std::cerr << tr("Error: no valid images found\n");
@@ -3787,12 +4031,19 @@ int run_spratlayout(int argc, char** argv) {
             // First, find an upper bound that can pack, then search all POT
             // rectangles up to that area and pick the least wasteful successful fit.
             int side = std::max(min_pot_width, min_pot_height);
-            std::vector<Sprite> best_sprites = sprites;
-            int best_w = 0;
-            int best_h = 0;
-            size_t best_area = 0;
+            int best_gpu_w = 0;
+            int best_gpu_h = 0;
+            size_t best_gpu_area = 0;
+            bool have_best_gpu = false;
+            std::vector<Sprite> best_gpu_sprites;
+
+            int best_space_w = 0;
+            int best_space_h = 0;
+            size_t best_space_area = 0;
+            bool have_best_space = false;
+            std::vector<Sprite> best_space_sprites;
+
             size_t max_candidate_area = 0;
-            bool have_best = false;
             std::vector<Sprite> trial_sprites;
 
             while (true) {
@@ -3814,15 +4065,16 @@ int run_spratlayout(int argc, char** argv) {
                         continue;
                     }
                     size_t area = static_cast<size_t>(side) * static_cast<size_t>(side);
-                    best_sprites = std::move(trial_sprites);
-                    best_w = side;
-                    best_h = side;
-                    best_area = area;
+                    best_gpu_sprites = trial_sprites;
+                    best_space_sprites = std::move(trial_sprites);
+                    best_gpu_w = best_space_w = side;
+                    best_gpu_h = best_space_h = side;
+                    best_gpu_area = best_space_area = area;
                     max_candidate_area = area;
-                    have_best = true;
+                    have_best_gpu = have_best_space = true;
                     break;
                 }
-                if (have_best) {
+                if (have_best_gpu) {
                     break;
                 }
                 if (side > std::numeric_limits<int>::max() / 2) {
@@ -3834,13 +4086,13 @@ int run_spratlayout(int argc, char** argv) {
 
             std::vector<int> pot_widths;
             std::vector<int> pot_heights;
-            for (int w = min_pot_width; w > 0 && std::cmp_less_equal(w, best_area); w *= 2) {
+            for (int w = min_pot_width; w > 0 && std::cmp_less_equal(w, max_candidate_area); w *= 2) {
                 pot_widths.push_back(w);
                 if (w > std::numeric_limits<int>::max() / 2) {
                     break;
                 }
             }
-            for (int h = min_pot_height; h > 0 && std::cmp_less_equal(h, best_area); h *= 2) {
+            for (int h = min_pot_height; h > 0 && std::cmp_less_equal(h, max_candidate_area); h *= 2) {
                 pot_heights.push_back(h);
                 if (h > std::numeric_limits<int>::max() / 2) {
                     break;
@@ -3859,7 +4111,9 @@ int run_spratlayout(int argc, char** argv) {
                     if (max_height_limit > 0 && h > max_height_limit) {
                         continue;
                     }
-                    if (!pick_better_layout_candidate(area, w, h, have_best, best_area, best_w, best_h, optimize_target)) {
+                    const bool could_beat_gpu = pick_better_layout_candidate(area, w, h, have_best_gpu, best_gpu_area, best_gpu_w, best_gpu_h, OptimizeTarget::GPU);
+                    const bool could_beat_space = pick_better_layout_candidate(area, w, h, have_best_space, best_space_area, best_space_w, best_space_h, OptimizeTarget::SPACE);
+                    if (!could_beat_gpu && !could_beat_space) {
                         continue;
                     }
 
@@ -3873,24 +4127,57 @@ int run_spratlayout(int argc, char** argv) {
                             continue;
                         }
 
-                        best_sprites = std::move(trial_sprites);
-                        best_w = w;
-                        best_h = h;
-                        best_area = area;
-                        have_best = true;
+                        if (could_beat_gpu) {
+                            best_gpu_sprites = trial_sprites;
+                            best_gpu_w = w;
+                            best_gpu_h = h;
+                            best_gpu_area = area;
+                            have_best_gpu = true;
+                        }
+                        if (could_beat_space) {
+                            if (could_beat_gpu) {
+                                best_space_sprites = best_gpu_sprites;
+                            } else {
+                                best_space_sprites = std::move(trial_sprites);
+                            }
+                            best_space_w = w;
+                            best_space_h = h;
+                            best_space_area = area;
+                            have_best_space = true;
+                        }
                         break;
                     }
                 }
             }
 
-            if (!have_best) {
+            if (!have_best_gpu && !have_best_space) {
                 std::cerr << tr("Error: failed to compute pot layout\n");
                 return 1;
             }
 
-            sprites = std::move(best_sprites);
-            atlas_width = best_w;
-            atlas_height = best_h;
+            if (optimize_target == OptimizeTarget::GPU) {
+                if (have_best_gpu) {
+                    sprites = std::move(best_gpu_sprites);
+                    atlas_width = best_gpu_w;
+                    atlas_height = best_gpu_h;
+                } else {
+                    std::cerr << tr("Warning: no GPU-optimal POT layout found, using space-optimal fallback\n");
+                    sprites = std::move(best_space_sprites);
+                    atlas_width = best_space_w;
+                    atlas_height = best_space_h;
+                }
+            } else {
+                if (have_best_space) {
+                    sprites = std::move(best_space_sprites);
+                    atlas_width = best_space_w;
+                    atlas_height = best_space_h;
+                } else {
+                    std::cerr << tr("Warning: no space-optimal POT layout found, using GPU-optimal fallback\n");
+                    sprites = std::move(best_gpu_sprites);
+                    atlas_width = best_gpu_w;
+                    atlas_height = best_gpu_h;
+                }
+            }
             atlases.push_back({atlas_width, atlas_height});
             for (auto& s : sprites) { s.atlas_index = 0; }
         } else if (mode == Mode::COMPACT) {
@@ -3898,18 +4185,6 @@ int run_spratlayout(int argc, char** argv) {
             std::cerr << tr("Error: compact bounds are invalid\n");
             return 1;
         }
-        const size_t combination_budget = max_combinations > 0
-            ? static_cast<size_t>(max_combinations)
-            : std::numeric_limits<size_t>::max();
-        std::atomic<size_t> combinations_tested{0};
-        auto consume_combination_budget = [&]() -> bool {
-            if (combination_budget == std::numeric_limits<size_t>::max()) {
-                combinations_tested.fetch_add(1, std::memory_order_relaxed);
-                return true;
-            }
-            const size_t previous = combinations_tested.fetch_add(1, std::memory_order_relaxed);
-            return previous < combination_budget;
-        };
         unsigned int worker_count = thread_limit > 0 ? thread_limit : std::thread::hardware_concurrency();
         if (worker_count == 0) {
             worker_count = 1;
@@ -3980,8 +4255,8 @@ int run_spratlayout(int argc, char** argv) {
             }
 
             if (better_gpu && better_space) {
-                best_gpu_candidate = candidate;
-                best_space_candidate = std::move(candidate);
+                best_gpu_candidate = std::move(candidate);
+                best_space_candidate = best_gpu_candidate;
                 return;
             }
             if (better_gpu) {
@@ -3991,17 +4266,12 @@ int run_spratlayout(int argc, char** argv) {
             best_space_candidate = std::move(candidate);
         };
 
-        bool budget_exhausted = false;
         std::vector<Sprite> seed_sprites;
-        for (size_t sort_idx = 0; sort_idx < sort_modes.size() && !budget_exhausted; ++sort_idx) {
+        for (size_t sort_idx = 0; sort_idx < sort_modes.size(); ++sort_idx) {
             if (enforce_name_order && sort_modes[sort_idx] != SortMode::None) {
                 continue;
             }
             for (RectHeuristic rect_heuristic : rect_heuristics) {
-                if (!consume_combination_budget()) {
-                    budget_exhausted = true;
-                    break;
-                }
                 seed_sprites.assign(sorted_sprites_by_mode[sort_idx].begin(), sorted_sprites_by_mode[sort_idx].end());
                 int seed_used_w = 0;
                 int seed_used_h = 0;
@@ -4061,7 +4331,7 @@ int run_spratlayout(int argc, char** argv) {
             const int range = std::max(0, width_upper_bound - fast_target_width);
             const int step = std::max(k_search_step_min, range / k_search_step_divisor);
             const std::array<int, k_guided_offsets_count> offsets = k_guided_search_offsets;
-            const std::array<int, k_guided_anchor_count> anchor_widths = {seed_width, fast_target_width, max_width};
+            const std::array<int, k_guided_anchor_count> anchor_widths = {seed_width, fast_target_width, max_width, width_upper_bound};
             for (int anchor : anchor_widths) {
                 for (int mul : offsets) {
                     const long long width_ll =
@@ -4076,7 +4346,7 @@ int run_spratlayout(int argc, char** argv) {
             }
             std::ranges::sort(width_candidates);
 
-            if (!budget_exhausted && !width_candidates.empty()) {
+            if (!width_candidates.empty()) {
                 worker_count = std::min<unsigned int>(worker_count, static_cast<unsigned int>(width_candidates.size()));
                 std::vector<LayoutCandidate> worker_gpu(worker_count);
                 std::vector<LayoutCandidate> worker_space(worker_count);
@@ -4103,8 +4373,8 @@ int run_spratlayout(int argc, char** argv) {
                             return;
                         }
                         if (better_gpu && better_space) {
-                            local_best_gpu = candidate;
-                            local_best_space = std::move(candidate);
+                            local_best_gpu = std::move(candidate);
+                            local_best_space = local_best_gpu;
                             return;
                         }
                         if (better_gpu) {
@@ -4115,22 +4385,14 @@ int run_spratlayout(int argc, char** argv) {
                     };
 
                     std::vector<Sprite> trial_sprites;
-                    bool local_budget_exhausted = false;
-                    for (size_t width_index = begin; width_index < end && !local_budget_exhausted; ++width_index) {
+                    for (size_t width_index = begin; width_index < end; ++width_index) {
                         const int width = width_candidates[width_index];
                         for (size_t sort_idx : k_guided_sort_indices) {
                             if (enforce_name_order && sort_idx != k_sort_mode_index_none) {
                                 continue;
                             }
-                            if (local_budget_exhausted) {
-                                break;
-                            }
 
                             for (RectHeuristic rect_heuristic : k_guided_heuristics) {
-                                if (!consume_combination_budget()) {
-                                    local_budget_exhausted = true;
-                                    break;
-                                }
                                 trial_sprites.assign(sorted_sprites_by_mode[sort_idx].begin(), sorted_sprites_by_mode[sort_idx].end());
                                 int used_w = 0;
                                 int used_h = 0;
@@ -4178,12 +4440,10 @@ int run_spratlayout(int argc, char** argv) {
                     }
                 }
 
-                budget_exhausted = (combination_budget != std::numeric_limits<size_t>::max()) &&
-                                   (combinations_tested.load(std::memory_order_relaxed) >= combination_budget);
             }
 
             // Include shelf candidates from same guided widths as a cheap fallback.
-            if (!budget_exhausted && !width_candidates.empty()) {
+            if (!width_candidates.empty()) {
                 worker_count = std::min<unsigned int>(worker_count, static_cast<unsigned int>(width_candidates.size()));
                 std::vector<LayoutCandidate> worker_gpu(worker_count);
                 std::vector<LayoutCandidate> worker_space(worker_count);
@@ -4210,8 +4470,8 @@ int run_spratlayout(int argc, char** argv) {
                             return;
                         }
                         if (better_gpu && better_space) {
-                            local_best_gpu = candidate;
-                            local_best_space = std::move(candidate);
+                            local_best_gpu = std::move(candidate);
+                            local_best_space = local_best_gpu;
                             return;
                         }
                         if (better_gpu) {
@@ -4222,16 +4482,11 @@ int run_spratlayout(int argc, char** argv) {
                     };
 
                     std::vector<Sprite> shelf_sprites;
-                    bool local_budget_exhausted = false;
-                    for (size_t width_index = begin; width_index < end && !local_budget_exhausted; ++width_index) {
+                    for (size_t width_index = begin; width_index < end; ++width_index) {
                         const int width = width_candidates[width_index];
                         for (size_t sort_idx : k_guided_sort_indices) {
                             if (enforce_name_order && sort_idx != k_sort_mode_index_none) {
                                 continue;
-                            }
-                            if (!consume_combination_budget()) {
-                                local_budget_exhausted = true;
-                                break;
                             }
                             shelf_sprites.assign(sorted_sprites_by_mode[sort_idx].begin(), sorted_sprites_by_mode[sort_idx].end());
                             int shelf_w = 0;
@@ -4285,9 +4540,19 @@ int run_spratlayout(int argc, char** argv) {
 
             const LayoutCandidate* selected_candidate = nullptr;
             if (optimize_target == OptimizeTarget::GPU) {
-                selected_candidate = best_gpu_candidate.valid ? &best_gpu_candidate : &best_space_candidate;
+                if (best_gpu_candidate.valid) {
+                    selected_candidate = &best_gpu_candidate;
+                } else {
+                    std::cerr << tr("Warning: no GPU-optimal layout found, using space-optimal fallback\n");
+                    selected_candidate = &best_space_candidate;
+                }
             } else {
-                selected_candidate = best_space_candidate.valid ? &best_space_candidate : &best_gpu_candidate;
+                if (best_space_candidate.valid) {
+                    selected_candidate = &best_space_candidate;
+                } else {
+                    std::cerr << tr("Warning: no space-optimal layout found, using GPU-optimal fallback\n");
+                    selected_candidate = &best_gpu_candidate;
+                }
             }
             if ((selected_candidate == nullptr) || !selected_candidate->valid) {
                 std::cerr << tr("Error: failed to compute compact layout\n");
@@ -4324,10 +4589,6 @@ int run_spratlayout(int argc, char** argv) {
                         has_padding_override
                             ? padding
                             : (compact_profile.padding ? *compact_profile.padding : 0);
-                    const int prewarm_max_combinations =
-                        has_max_combinations_override
-                            ? max_combinations
-                            : (compact_profile.max_combinations ? *compact_profile.max_combinations : 0);
                     const double prewarm_scale =
                         has_scale_override
                             ? scale
@@ -4344,7 +4605,6 @@ int run_spratlayout(int argc, char** argv) {
                         prewarm_max_height,
                         prewarm_padding,
                         extrude,
-                        prewarm_max_combinations,
                         prewarm_scale,
                         prewarm_trim_transparent,
                         allow_rotate,
@@ -4371,7 +4631,8 @@ int run_spratlayout(int argc, char** argv) {
                         false,
                         prewarm_candidate.sprites,
                         empty_prewarm_aliases,
-                        false
+                        false,
+                        input_context.working_folder
                     );
                     save_output_cache(
                         build_output_cache_path(cache_path, prewarm_signature),
@@ -4441,14 +4702,38 @@ int run_spratlayout(int argc, char** argv) {
         }
     }
 
-    if (padding > 0 && !multipack) {
-        if (!compute_tight_atlas_bounds(sprites, atlas_width, atlas_height)) {
-            std::cerr << tr("Error: failed to compute final atlas bounds\n");
-            return 1;
-        }
-        if (!atlases.empty()) {
-            atlases[0].width = atlas_width;
-            atlases[0].height = atlas_height;
+    if (padding > 0) {
+        if (multipack) {
+            for (size_t ai = 0; ai < atlases.size(); ++ai) {
+                int tight_w = 0;
+                int tight_h = 0;
+                for (const auto& s : sprites) {
+                    if (s.atlas_index != static_cast<int>(ai)) {
+                        continue;
+                    }
+                    int x1 = 0;
+                    int y1 = 0;
+                    if (!checked_add_int(s.x, s.w, x1) || !checked_add_int(s.y, s.h, y1)) {
+                        std::cerr << tr("Error: failed to compute final atlas bounds\n");
+                        return 1;
+                    }
+                    tight_w = std::max(x1, tight_w);
+                    tight_h = std::max(y1, tight_h);
+                }
+                if (tight_w > 0 && tight_h > 0) {
+                    atlases[ai].width = tight_w;
+                    atlases[ai].height = tight_h;
+                }
+            }
+        } else {
+            if (!compute_tight_atlas_bounds(sprites, atlas_width, atlas_height)) {
+                std::cerr << tr("Error: failed to compute final atlas bounds\n");
+                return 1;
+            }
+            if (!atlases.empty()) {
+                atlases[0].width = atlas_width;
+                atlases[0].height = atlas_height;
+            }
         }
     }
 
@@ -4476,8 +4761,6 @@ int run_spratlayout(int argc, char** argv) {
         save_layout_seed_cache(seed_cache_path, next_seed);
     }
 
-    // Placeholder aliases vector (deduplication not yet fully implemented)
-    const std::vector<std::pair<std::string, std::string>> layout_aliases;
     const std::string output_text = build_layout_output_text(
         atlases,
         scale,
@@ -4486,7 +4769,8 @@ int run_spratlayout(int argc, char** argv) {
         multipack,
         sprites,
         layout_aliases,
-        debug
+        debug,
+        input_context.working_folder
     );
 
 #ifdef _WIN32
