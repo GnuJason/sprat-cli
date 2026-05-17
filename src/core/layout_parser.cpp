@@ -261,6 +261,23 @@ bool parse_layout(std::istream& in, Layout& out, std::string& error) {
                 return false;
             }
             parsed.atlases.push_back({w, h});
+        } else if (line.starts_with("root")) {
+            if (parsed.has_root) {
+                error = "Duplicate root line";
+                return false;
+            }
+            size_t pos = 4;
+            while (pos < line.size() && (line[pos] == ' ' || line[pos] == '\t')) {
+                ++pos;
+            }
+            std::string root_path;
+            std::string root_error;
+            if (!parse_quoted(line, pos, root_path, root_error)) {
+                error = "Invalid root line: " + root_error;
+                return false;
+            }
+            parsed.root = root_path;
+            parsed.has_root = true;
         } else if (line.starts_with("scale")) {
             if (parsed.has_scale) {
                 error = "Duplicate scale line";

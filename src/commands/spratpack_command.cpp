@@ -32,6 +32,7 @@
 #include <thread>
 #include <utility>
 #include <fstream>
+#include <filesystem>
 #include <archive.h>
 #include <archive_entry.h>
 #include "core/layout_parser.h"
@@ -554,6 +555,27 @@ int run_spratpack(int argc, char** argv) {
     if (!parse_layout(std::cin, layout, parse_error)) {
         std::cerr << parse_error << "\n";
         return 1;
+    }
+
+    // Resolve relative sprite paths using the root directory from the layout.
+    if (layout.has_root && !layout.root.empty()) {
+        std::filesystem::path root_path(layout.root);
+        for (auto& sprite : layout.sprites) {
+            std::filesystem::path sp(sprite.path);
+            if (sp.is_relative()) {
+                sprite.path = (root_path / sp).string();
+            }
+        }
+        for (auto& alias : layout.aliases) {
+            std::filesystem::path ap(alias.first);
+            if (ap.is_relative()) {
+                alias.first = (root_path / ap).string();
+            }
+            std::filesystem::path cp(alias.second);
+            if (cp.is_relative()) {
+                alias.second = (root_path / cp).string();
+            }
+        }
     }
 
     if (requested_atlas_index >= 0 && static_cast<size_t>(requested_atlas_index) >= layout.atlases.size()) {

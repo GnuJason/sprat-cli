@@ -1167,7 +1167,7 @@ bool detect_and_extract_tar_content(const fs::path& input_path, InputContext& ou
         out_context.working_folder = input_path;
         return true;
     }
-    
+
     return false;
 }
 
@@ -4623,6 +4623,9 @@ int run_spratlayout(int argc, char** argv) {
                     std::vector<Atlas> prewarm_atlases;
                     prewarm_atlases.push_back({prewarm_candidate.w, prewarm_candidate.h});
                     std::vector<std::pair<std::string, std::string>> empty_prewarm_aliases;
+                    const fs::path prewarm_root = (input_context.type == InputType::ListFile)
+                        ? input_context.working_folder.parent_path()
+                        : input_context.working_folder;
                     const std::string prewarm_output = build_layout_output_text(
                         prewarm_atlases,
                         prewarm_scale,
@@ -4632,7 +4635,7 @@ int run_spratlayout(int argc, char** argv) {
                         prewarm_candidate.sprites,
                         empty_prewarm_aliases,
                         false,
-                        input_context.working_folder
+                        prewarm_root
                     );
                     save_output_cache(
                         build_output_cache_path(cache_path, prewarm_signature),
@@ -4761,6 +4764,9 @@ int run_spratlayout(int argc, char** argv) {
         save_layout_seed_cache(seed_cache_path, next_seed);
     }
 
+    const fs::path output_root = (input_context.type == InputType::ListFile)
+        ? input_context.working_folder.parent_path()
+        : input_context.working_folder;
     const std::string output_text = build_layout_output_text(
         atlases,
         scale,
@@ -4770,7 +4776,7 @@ int run_spratlayout(int argc, char** argv) {
         sprites,
         layout_aliases,
         debug,
-        input_context.working_folder
+        output_root
     );
 
 #ifdef _WIN32

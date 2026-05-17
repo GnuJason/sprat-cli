@@ -45,6 +45,8 @@ struct Atlas {
 
 struct Layout {
     std::vector<Atlas> atlases;
+    std::string root;
+    bool has_root = false;
     double scale = 1.0;
     bool has_scale = false;
     int extrude = 0;

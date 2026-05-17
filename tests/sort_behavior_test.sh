@@ -90,7 +90,7 @@ $(fix_path "$tmp_dir/frames/b.png")
 $(fix_path "$tmp_dir/frames/d.png")
 $(fix_path "$tmp_dir/frames/a.png")
 EOF
-"$spratlayout_bin" "$(fix_path "$list_file")" --mode fast --sort none | extract_sprite_paths | sed "s|$(fix_path "$tmp_dir/frames/")||g" > "$tmp_dir/out_none.txt"
+"$spratlayout_bin" "$(fix_path "$list_file")" --mode fast --sort none | extract_sprite_paths | sed -e "s|$(fix_path "$tmp_dir/frames/")||g" -e "s|frames/||g" > "$tmp_dir/out_none.txt"
 # Height order: b (40), d (30), c (20), a (10)
 cat > "$tmp_dir/expected_none.txt" <<EOF
 "b.png"
@@ -113,7 +113,7 @@ $(fix_path "$tmp_dir/frames/b.png")
 $(fix_path "$tmp_dir/frames/c.png")
 $(fix_path "$tmp_dir/frames/d.png")
 EOF
-"$spratlayout_bin" "$(fix_path "$list_file_default")" --mode fast | extract_sprite_paths | sed "s|$(fix_path "$tmp_dir/frames/")||g" > "$tmp_dir/out_list_default.txt"
+"$spratlayout_bin" "$(fix_path "$list_file_default")" --mode fast | extract_sprite_paths | sed -e "s|$(fix_path "$tmp_dir/frames/")||g" -e "s|frames/||g" > "$tmp_dir/out_list_default.txt"
 # Height order: b (40), d (30), c (20), a (10)
 cat > "$tmp_dir/expected_list_default.txt" <<EOF
 "b.png"
@@ -136,7 +136,7 @@ $(fix_path "$tmp_dir/frames/b.png")
 $(fix_path "$tmp_dir/frames/d.png")
 $(fix_path "$tmp_dir/frames/a.png")
 EOF
-"$spratlayout_bin" "$(fix_path "$list_file_name")" --mode fast --sort name | extract_sprite_paths | sed "s|$(fix_path "$tmp_dir/frames/")||g" > "$tmp_dir/out_name.txt"
+"$spratlayout_bin" "$(fix_path "$list_file_name")" --mode fast --sort name | extract_sprite_paths | sed -e "s|$(fix_path "$tmp_dir/frames/")||g" -e "s|frames/||g" > "$tmp_dir/out_name.txt"
 cat > "$tmp_dir/expected_name.txt" <<EOF
 "a.png"
 "b.png"
