@@ -9,6 +9,7 @@
 #include <io.h>
 #include <fcntl.h>
 #include <stdio.h>
+#include <intrin.h>
 #ifndef STDIN_FILENO
 #define STDIN_FILENO 0
 #endif
@@ -21,6 +22,12 @@
 #ifndef _setmode
 #define _setmode setmode
 #endif
+#endif
+
+#ifdef _MSC_VER
+static inline int popcount64(unsigned long long x) { return (int)__popcnt64(x); }
+#else
+static inline int popcount64(unsigned long long x) { return __builtin_popcountll(x); }
 #endif
 
 #include <algorithm>
@@ -3876,7 +3883,7 @@ int run_spratlayout(int argc, char** argv) {
             for (size_t j = i + 1; j < N; ++j) {
                 if (phash[j] == 0) continue;
                 if (sprites[i].w != sprites[j].w || sprites[i].h != sprites[j].h) continue;
-                if (__builtin_popcountll(phash[i] ^ phash[j]) <= k_dhash_threshold) {
+                if (popcount64(phash[i] ^ phash[j]) <= k_dhash_threshold) {
                     size_t ri = find(i), rj = find(j);
                     if (ri != rj) parent[rj] = ri;
                 }
