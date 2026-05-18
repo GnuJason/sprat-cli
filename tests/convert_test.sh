@@ -39,8 +39,8 @@ sprite "./frames/a\"q.png" 0,0 8,8
 LAYOUTQ
 
 "$convert_bin" --list-transforms > "$tmp_dir/list.txt"
-for fmt in json csv xml css; do
-  if ! grep -q "^${fmt}\b" "$tmp_dir/list.txt"; then
+for fmt in JSON CSV XML CSS; do
+  if ! grep -qi "^${fmt}\b" "$tmp_dir/list.txt"; then
     echo "Missing transform in list: $fmt" >&2
     exit 1
   fi
@@ -52,6 +52,7 @@ grep -q '"height": 32' "$tmp_dir/out.json"
 grep -q '"multipack": false' "$tmp_dir/out.json"
 grep -q '"extrude": 0' "$tmp_dir/out.json"
 grep -q '"path": "./frames/b.png"' "$tmp_dir/out.json"
+grep -q '"atlas_index": 0' "$tmp_dir/out.json"
 
 "$convert_bin" --transform csv < "$layout_file" > "$tmp_dir/out.csv"
 grep -q '^index,name,path,atlas_index,atlas_path,x,y,w,h,pivot_x,pivot_y,trim_left,trim_top,trim_right,trim_bottom,marker_count,markers_json,rotation$' "$tmp_dir/out.csv"
@@ -63,7 +64,7 @@ grep -q '<atlas index="0" width="64" height="32" path="">' "$tmp_dir/out.xml"
 grep -q 'trim_left="1" trim_top="2" trim_right="3" trim_bottom="4"' "$tmp_dir/out.xml"
 
 "$convert_bin" --transform css < "$layout_file" > "$tmp_dir/out.css"
-grep -Fq '.sprite-1 {' "$tmp_dir/out.css"
+grep -Fq '.sprite-b {' "$tmp_dir/out.css"
 grep -q '^  background-position: -16px -0px;$' "$tmp_dir/out.css"
 
 custom_transform="$tmp_dir/custom.transform"
@@ -281,6 +282,7 @@ grep -q '"markers": \[{"name":"hit","type":"point","x":3,"y":5},{"name":"hurt","
 grep -q '"name": "run"' "$tmp_dir/out.builtin.json"
 grep -q '"fps": 8' "$tmp_dir/out.builtin.json"
 grep -q '"sprite_indexes": \[0,1\]' "$tmp_dir/out.builtin.json"
+grep -q '"sprite_names": \["a","b"\]' "$tmp_dir/out.builtin.json"
 if grep -q '"index":' "$tmp_dir/out.builtin.json"; then
   echo "builtin json transform should not include index fields in sprite/animation objects" >&2
   exit 1

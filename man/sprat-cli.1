@@ -1,4 +1,4 @@
-.TH SPRAT-CLI 1 "March 2026" "sprat-cli" "User Commands"
+.TH SPRAT-CLI 1 "May 2026" "sprat-cli" "User Commands"
 .SH NAME
 sprat-cli \- sprite atlas layout and packing pipeline
 .SH SYNOPSIS
@@ -157,6 +157,8 @@ The core structure is defined by iteration blocks:
 .PP
 Templates support marker/animation conditional sections (\fB[if_markers]\fR, \fB[if_no_markers]\fR, \fB[if_animations]\fR, \fB[if_no_animations]\fR) and optional separator/header/footer sections.
 .PP
+A general conditional syntax \fB[if ATTR="VALUE"]...[/if]\fR (or \fB[if ATTR!="VALUE"]...[/if]\fR) is also supported. At the section level it maps \fBhas_markers\fR and \fBhas_animations\fR to the corresponding conditional blocks. Within section content it can test any current rendering variable (for example \fB[if marker_type="point"]...[/if]\fR).
+.PP
 Placeholders:
 .IP "\(bu" 2
 \fBSprite fields\fR: \fB{{name}}\fR (basename without extension), \fB{{path}}\fR, \fB{{x}}\fR, \fB{{y}}\fR, \fB{{w}}\fR, \fB{{h}}\fR.
@@ -167,11 +169,11 @@ Placeholders:
 .IP "\(bu" 2
 \fBMarker fields\fR: \fB{{marker_name}}\fR, \fB{{marker_type}}\fR, \fB{{marker_sprite_index}}\fR, \fB{{marker_sprite_name}}\fR.
 .IP "\(bu" 2
-\fBAnimation fields\fR: \fB{{animation_name}}\fR, \fB{{animation_sprite_indexes_json}}\fR.
+\fBAnimation fields\fR: \fB{{animation_name}}\fR, \fB{{animation_sprite_indexes_json}}\fR, \fB{{sprite_names}}\fR/\fB{{sprite_names_json}}\fR/\fB{{sprite_names_csv}}\fR (display names of frame sprites).
 .IP "\(bu" 2
 Typed placeholders (for example \fB{{name_json}}\fR, \fB{{marker_vertices_xml}}\fR) are explicit and recommended.
 .PP
-Built-in JSON transform output omits \fBindex\fR fields from \fBsprites[]\fR and \fBanimations[]\fR.
+The built-in JSON transform produces a top-level \fBatlases\fR array (each entry has \fBwidth\fR, \fBheight\fR, \fBpath\fR) and a flat top-level \fBsprites\fR array. Sprite spatial data is grouped into nested objects: \fBrect\fR (\fBx\fR, \fBy\fR, \fBw\fR, \fBh\fR), \fBpivot\fR (\fBx\fR, \fBy\fR), and \fBtrim\fR (\fBleft\fR, \fBtop\fR, \fBright\fR, \fBbottom\fR). Index fields are omitted from \fBsprites[]\fR and \fBanimations[]\fR entries.
 .SS spratframes
 Scans \fIinput_image\fR and detects sprite boundaries by finding non-transparent connected components or by detecting rectangles of a specific color.
 Prints layout-compatible lines:

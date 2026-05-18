@@ -437,8 +437,8 @@ std::string replace_tokens(const std::string& input,
 
     auto is_composite_variable = [](std::string_view key) {
         return key == "sprites" || key == "markers" || key == "animations" || 
-               key == "sprite_markers" || key == "atlases" || key == "sprite_indexes" || 
-               key == "vertices";
+               key == "sprite_markers" || key == "atlases" || key == "sprite_indexes" ||
+               key == "sprite_names" || key == "vertices";
     };
 
     size_t i = 0;
@@ -481,6 +481,34 @@ std::string replace_tokens(const std::string& input,
         }
     }
 
+    return out;
+}
+
+std::string format_sprite_names(const std::vector<int>& indexes,
+                                const std::vector<std::string>& names,
+                                PlaceholderEncoding encoding) {
+    if (indexes.empty()) {
+        return (encoding == PlaceholderEncoding::json) ? "[]" : "";
+    }
+    const char* sep = (encoding == PlaceholderEncoding::csv) ? "|" : ",";
+    std::string out;
+    if (encoding == PlaceholderEncoding::json) {
+        out += '[';
+    }
+    for (size_t i = 0; i < indexes.size(); ++i) {
+        if (i > 0) out += sep;
+        const std::string& name = names[static_cast<size_t>(indexes[i])];
+        if (encoding == PlaceholderEncoding::json) {
+            out += '"';
+            out += escape_json(name);
+            out += '"';
+        } else {
+            out += name;
+        }
+    }
+    if (encoding == PlaceholderEncoding::json) {
+        out += ']';
+    }
     return out;
 }
 
@@ -592,6 +620,17 @@ void collect_sprite_name_indexes(const Layout& layout,
         by_path[s.path] = idx;
         fs::path p(s.path);
         by_path[p.filename().string()] = idx;
+        // Index all path suffixes so raw-format paths without a leading prefix
+        // (e.g. a temp-dir segment) can still be resolved against layout paths.
+        size_t sep = s.path.find('/');
+        while (sep != std::string::npos) {
+            ++sep;
+            std::string suffix = s.path.substr(sep);
+            if (!suffix.empty()) {
+                by_path.emplace(suffix, idx); // emplace: first entry wins; avoids overwriting exact/filename entries
+            }
+            sep = s.path.find('/', sep);
+        }
         std::string name = sprite_name_from_path(s.path);
         sprite_names.push_back(name);
         by_name[name] = idx;
@@ -605,6 +644,20 @@ int resolve_sprite_index(const std::string& key,
     auto by_path_it = by_path.find(key);
     if (by_path_it != by_path.end()) {
         return by_path_it->second;
+    }
+    // Strip leading path components one at a time so that an absolute path like
+    // /tmp/sprat-gui-hVtnpu/Brawler-Girl/... can match a layout path indexed as
+    // sprat-gui-hVtnpu/Brawler-Girl/...
+    size_t sep = key.find('/');
+    while (sep != std::string::npos) {
+        ++sep;
+        if (sep < key.size()) {
+            auto it = by_path.find(key.substr(sep));
+            if (it != by_path.end()) {
+                return it->second;
+            }
+        }
+        sep = key.find('/', sep);
     }
     auto by_name_it = by_name.find(key);
     if (by_name_it != by_name.end()) {
@@ -1361,6 +1414,7 @@ void print_usage() {
               << tr("  --transform NAME|PATH      Transform name or path (default: json)\n")
               << tr("  --output, -o PATTERN       Atlas path pattern for atlas_* placeholders\n")
               << tr("  --list-transforms          Print available transforms and exit\n")
+              << tr("  --transforms-dir           Print the transforms directory and exit\n")
               << tr("  --markers PATH             Load external markers file\n")
               << tr("  --animations PATH          Load external animations file\n")
               << tr("  --auto-animations          Group frames into animations by name pattern\n")
@@ -1381,6 +1435,7 @@ int run_spratconvert(int argc, char** argv) {
     std::string animations_path_arg;
     std::string output_pattern_arg;
     bool list_only = false;
+    bool show_transforms_dir = false;
     bool auto_animations = false;
 
     for (int i = 1; i < argc; ++i) {
@@ -1397,6 +1452,8 @@ int run_spratconvert(int argc, char** argv) {
             auto_animations = true;
         } else if (arg == "--list-transforms") {
             list_only = true;
+        } else if (arg == "--transforms-dir") {
+            show_transforms_dir = true;
         } else if (arg == "--help" || arg == "-h") {
             print_usage();
             return 0;
@@ -1407,6 +1464,11 @@ int run_spratconvert(int argc, char** argv) {
             print_usage();
             return 1;
         }
+    }
+
+    if (show_transforms_dir) {
+        std::cout << find_transforms_dir().string() << "\n";
+        return 0;
     }
 
     if (list_only) {
@@ -1615,6 +1677,20 @@ int run_spratconvert(int argc, char** argv) {
         }
         vars["path"] = s.path;
         vars["name"] = sprite_names[i];
+        {
+            std::string css_id;
+            for (char c : sprite_names[i]) {
+                if (std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_') {
+                    css_id.push_back(c);
+                } else {
+                    css_id.push_back('-');
+                }
+            }
+            if (!css_id.empty() && std::isdigit(static_cast<unsigned char>(css_id[0]))) {
+                css_id.insert(0, 1, '_');
+            }
+            vars["name_css"] = std::move(css_id);
+        }
         vars["x"] = std::to_string(s.x);
         vars["y"] = std::to_string(s.y);
         vars["w"] = std::to_string(s.w);
@@ -1686,6 +1762,21 @@ int run_spratconvert(int argc, char** argv) {
         }
     } else if (!transform.if_no_markers.empty()) {
         std::cout << replace_tokens(transform.if_no_markers, global_vars, placeholder_encoding);
+    }
+
+    // Pre-compute all sprites for use in non-atlas contexts (header, atlas_footer, footer, etc.).
+    // When {{sprites}} is used inside [atlas], avars["sprites"] overrides this with per-atlas sprites.
+    if (!transform.sprite.empty()) {
+        std::string all_sprites;
+        std::map<std::string, std::string> svars_pre = global_vars;
+        for (size_t j = 0; j < layout.sprites.size(); ++j) {
+            if (j > 0 && !transform.separator.empty()) {
+                all_sprites += replace_tokens(transform.separator, global_vars, placeholder_encoding);
+            }
+            populate_sprite_vars(svars_pre, j);
+            all_sprites += replace_tokens(transform.sprite, svars_pre, placeholder_encoding);
+        }
+        global_vars["sprites"] = std::move(all_sprites);
     }
 
     if (!transform.atlas.empty()) {
@@ -1762,6 +1853,7 @@ int run_spratconvert(int argc, char** argv) {
                 vars["animation_name"] = animation.name;
                 vars["animation_sprite_count"] = std::to_string(animation.sprite_indexes.size());
                 vars["sprite_indexes"] = format_sprite_indexes(animation.sprite_indexes, placeholder_encoding);
+                vars["sprite_names"] = format_sprite_names(animation.sprite_indexes, sprite_names, placeholder_encoding);
                 vars["fps"] = std::to_string(animation.fps);
                 vars["animation_fps"] = vars["fps"];
                 std::cout << replace_tokens(transform.animations, vars, placeholder_encoding);

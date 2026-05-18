@@ -1,5 +1,5 @@
 [meta]
-name=css
+name=CSS
 description=CSS classes for web sprite rendering
 extension=.css
 [/meta]
@@ -19,7 +19,7 @@ extension=.css
 
 [sprites]
   [sprite]
-.sprite-{{index}} {
+.sprite-{{name_css}} {
   [if atlas_path!=""]
   background-image: url('{{atlas_path}}');
   [/if]

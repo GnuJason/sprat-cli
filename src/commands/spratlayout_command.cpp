@@ -100,6 +100,7 @@ enum class ResolutionReference : std::uint8_t { Largest, Smallest };
 
 struct ProfileDefinition {
     std::string name;
+    std::string label;
     Mode mode = Mode::COMPACT;
     OptimizeTarget optimize_target = OptimizeTarget::GPU;
     std::optional<int> max_width;
@@ -540,6 +541,8 @@ bool parse_profiles_config(std::istream& input,
                 return false;
             }
             current->resolution_reference = ref;
+        } else if (lower_key == "label") {
+            current->label = value;
         } else {
             error = "unknown key '" + key + "' at line " + std::to_string(line_number);
             return false;
@@ -1272,6 +1275,9 @@ bool load_image_cache(const fs::path& cache_path,
         entry.trim_transparent = trim_flag != 0;
         const std::string key = path + (entry.trim_transparent ? "|1" : "|0");
         out[key] = entry;
+        if (out.size() >= k_max_cache_entries) {
+            break;
+        }
     }
 
     return true;
@@ -1279,10 +1285,6 @@ bool load_image_cache(const fs::path& cache_path,
 
 bool save_image_cache(const fs::path& cache_path,
                       const std::unordered_map<std::string, ImageCacheEntry>& entries) {
-    if (entries.size() > k_max_cache_entries) { // Limit cache size
-        return false;
-    }
-
     fs::path tmp = cache_path;
     tmp += ".tmp";
 
@@ -1291,18 +1293,32 @@ bool save_image_cache(const fs::path& cache_path,
         return false;
     }
 
-    out << "spratlayout_cache 3\n";
+    // Collect valid entries; if over the limit, keep only the most recently used.
+    using KV = std::pair<const std::string*, const ImageCacheEntry*>;
+    std::vector<KV> valid;
+    valid.reserve(entries.size());
     for (const auto& kv : entries) {
-        std::string path = kv.first;
+        const ImageCacheEntry& e = kv.second;
+        if (e.w > 0 && e.h > 0 && e.w <= k_max_image_dimension && e.h <= k_max_image_dimension) {
+            valid.push_back({&kv.first, &e});
+        }
+    }
+    if (valid.size() > k_max_cache_entries) {
+        std::ranges::sort(valid, [](const KV& a, const KV& b) {
+            return a.second->cached_at_unix > b.second->cached_at_unix; // newest first
+        });
+        valid.resize(k_max_cache_entries);
+    }
+
+    out << "spratlayout_cache 3\n";
+    for (const auto& [key_ptr, e_ptr] : valid) {
+        std::string path = *key_ptr;
         if (path.size() > 2 &&
             path[path.size() - 2] == '|' &&
             (path.back() == '0' || path.back() == '1')) {
             path = path.substr(0, path.size() - 2);
         }
-        const ImageCacheEntry& e = kv.second;
-        if (e.w <= 0 || e.h <= 0 || e.w > k_max_image_dimension || e.h > k_max_image_dimension) {
-            continue;
-        }
+        const ImageCacheEntry& e = *e_ptr;
         out << std::quoted(path) << " "
             << (e.trim_transparent ? 1 : 0) << " "
             << e.file_size << " "
@@ -1415,6 +1431,7 @@ void print_usage() {
               << tr("Options:\n")
               << tr("  --profile NAME             Profile name from config (default: fast)\n")
               << tr("  --profiles-config PATH     Use an explicit profile configuration file\n")
+              << tr("  --default-profiles-config  Print the default profiles config path and exit\n")
               << tr("  --mode MODE                Packing algorithm: compact, pot, or fast\n")
               << tr("  --optimize TARGET          Optimization metric: gpu (min max-side) or space (min area)\n")
               << tr("  --max-width N              Maximum atlas width\n")
@@ -1452,10 +1469,30 @@ bool is_file_older_than_seconds(const fs::path& path, long long max_age_seconds)
     }
     fs::file_time_type now = fs::file_time_type::clock::now();
     if (file_time > now) {
-        return false;
+        return true; // future mtime (clock skew); treat as stale
     }
     long long age = std::chrono::duration_cast<std::chrono::seconds>(now - file_time).count();
     return age > max_age_seconds;
+}
+
+// Builds a sorted-or-ordered list of "path|file_size|mtime" strings for all sources.
+std::vector<std::string> build_source_sig_parts(bool preserve_source_order,
+                                                       const std::vector<ImageSource>& sources) {
+    std::vector<std::string> parts;
+    parts.reserve(sources.size());
+    for (const auto& source : sources) {
+        std::string line;
+        line += source.path;
+        line += '|';
+        line += std::to_string(source.meta.file_size);
+        line += '|';
+        line += std::to_string(source.meta.mtime_ticks);
+        parts.push_back(std::move(line));
+    }
+    if (!preserve_source_order) {
+        std::ranges::sort(parts);
+    }
+    return parts;
 }
 
 std::string build_layout_signature(const std::string& profile_name,
@@ -1471,20 +1508,7 @@ std::string build_layout_signature(const std::string& profile_name,
                                    bool preserve_source_order,
                                    const std::string& deduplicateMode,
                                    const std::vector<ImageSource>& sources) {
-    std::vector<std::string> parts;
-    parts.reserve(sources.size());
-    for (const auto& source : sources) {
-        std::string line;
-        line += source.path;
-        line += '|';
-        line += std::to_string(source.meta.file_size);
-        line += '|';
-        line += std::to_string(source.meta.mtime_ticks);
-        parts.push_back(std::move(line));
-    }
-    if (!preserve_source_order) {
-        std::ranges::sort(parts);
-    }
+    const std::vector<std::string> parts = build_source_sig_parts(preserve_source_order, sources);
 
     std::array<char, 32> scale_buf{};
     std::snprintf(scale_buf.data(), scale_buf.size(), "%.*g", k_floating_point_precision, scale);
@@ -1531,20 +1555,7 @@ std::string build_layout_seed_signature(const std::string& profile_name,
                                         bool allow_rotate,
                                         bool preserve_source_order,
                                         const std::vector<ImageSource>& sources) {
-    std::vector<std::string> parts;
-    parts.reserve(sources.size());
-    for (const auto& source : sources) {
-        std::string line;
-        line += source.path;
-        line += '|';
-        line += std::to_string(source.meta.file_size);
-        line += '|';
-        line += std::to_string(source.meta.mtime_ticks);
-        parts.push_back(std::move(line));
-    }
-    if (!preserve_source_order) {
-        std::ranges::sort(parts);
-    }
+    const std::vector<std::string> parts = build_source_sig_parts(preserve_source_order, sources);
 
     std::array<char, 32> scale_buf{};
     std::snprintf(scale_buf.data(), scale_buf.size(), "%.*g", k_floating_point_precision, scale);
@@ -1783,7 +1794,7 @@ void prune_cache_family_group(const fs::path& base_cache_path,
             continue;
         }
 
-        if (name.size() >= 4 && name.substr(name.size() - 4) == ".tmp") {
+        if (name.ends_with(".tmp")) {
             fs::remove(entry.path(), ec);
             ec.clear();
             continue;
@@ -3110,6 +3121,7 @@ int run_spratlayout(int argc, char** argv) {
     bool has_frame_sort_override = false;
     unsigned int thread_limit = 0;
     bool has_threads_override = false;
+    bool show_profiles_config = false;
 
     // parse args
     for (int i = 1; i < argc; ++i) {
@@ -3134,6 +3146,8 @@ int run_spratlayout(int argc, char** argv) {
             has_preset = true;
         } else if (arg == "--profiles-config" && i + 1 < argc) {
             profiles_config_path = argv[++i];
+        } else if (arg == "--default-profiles-config") {
+            show_profiles_config = true;
         } else if (arg == "--mode" && i + 1 < argc) {
             std::string value = argv[++i];
             std::string error;
@@ -3267,6 +3281,23 @@ int run_spratlayout(int argc, char** argv) {
                 return 1;
             }
         }
+    }
+
+    if (show_profiles_config) {
+        const fs::path cwd_local = fs::current_path();
+        const fs::path exec_dir_local = sprat::core::get_executable_dir(argv[0]);
+        const auto candidates = build_default_profiles_config_candidates(cwd_local, exec_dir_local);
+        for (const fs::path& candidate : candidates) {
+            std::error_code ec;
+            if (fs::exists(candidate, ec) && !ec) {
+                std::cout << candidate.string() << "\n";
+                return 0;
+            }
+        }
+        if (!candidates.empty()) {
+            std::cout << candidates.front().string() << "\n";
+        }
+        return 0;
     }
 
     if (folder.empty()) {

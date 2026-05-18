@@ -510,6 +510,8 @@ Built-in transform files live in `transforms/`:
 - `transforms/xml.transform`
 - `transforms/css.transform`
 
+The built-in JSON transform (`--transform json`) produces a top-level `atlases` array (each entry has `width`, `height`, `path`) and a flat top-level `sprites` array. Sprite spatial data is grouped into nested objects: `rect` (`x`, `y`, `w`, `h`), `pivot` (`x`, `y`), and `trim` (`left`, `top`, `right`, `bottom`). Use `atlas_index` in each sprite entry to associate it with an atlas when multipacking.
+
 Each transform is section-based. You can use explicit open/close tags (e.g., `[meta]` ... `[/meta]`) or the modern line-based DSL (e.g., `meta`, `header`, `sprites`, `- sprite`).
 
 - `[meta]` / `meta`: metadata like `name`, `description`, `extension`
@@ -521,6 +523,7 @@ Each transform is section-based. You can use explicit open/close tags (e.g., `[m
 - `[if_animations]` / `[if_no_animations]` conditional blocks based on animation items
 - `[animations_header]`, `[animations]`, `[animation]`, `[animations_separator]`, `[animations_footer]` animation loop sections
 - `[footer]` / `footer`: printed once after sprites
+- `[if ATTR="VALUE"]...[/if]` or `[if ATTR!="VALUE"]...[/if]`: conditional block emitted only when the variable `ATTR` equals (or does not equal) `VALUE`. At the top level, supports `has_markers` and `has_animations` (e.g., `[if has_animations="true"]`); within section content, any current rendering variable can be tested (e.g., `[if marker_type="point"]`).
 
 Common placeholders:
 
@@ -542,6 +545,7 @@ Common placeholders:
 - Animation loop placeholders:
   - `{{animation_index}}`, `{{animation_name}}`
   - `{{animation_sprite_count}}`, `{{animation_sprite_indexes}}`, `{{animation_sprite_indexes_json}}`, `{{animation_sprite_indexes_csv}}`
+  - `{{sprite_names}}`, `{{sprite_names_json}}`, `{{sprite_names_csv}}` (display names of the sprites belonging to this animation)
 - Extra file placeholders:
   - `{{has_markers}}`, `{{has_animations}}`, `{{marker_count}}`, `{{animation_count}}`
   - `{{markers_path}}`, `{{animations_path}}`

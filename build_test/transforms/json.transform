@@ -1,5 +1,5 @@
 [meta]
-name=json
+name=JSON
 description=JSON metadata for scripting and runtime loading
 extension=.json
 [/meta]
@@ -22,10 +22,7 @@ extension=.json
     {
       "width": {{atlas_width}},
       "height": {{atlas_height}},
-      "path": "{{atlas_path}}",
-      "sprites": [
-        {{sprites}}
-      ]
+      "path": "{{atlas_path}}"
     }
 [/atlas]
 
@@ -36,13 +33,16 @@ extension=.json
 
 [atlas_footer]
 
+  ],
+  "sprites": [
+    {{sprites}}
   ]
 [/atlas_footer]
 [/atlases]
 
 [sprites]
   [sprite]
-{"name": "{{name}}", "path": "{{path}}", "atlas_index": {{atlas_index}}, "x": {{x}}, "y": {{y}}, "w": {{w}}, "h": {{h}}, "pivot_x": {{pivot_x}}, "pivot_y": {{pivot_y}}, "trim_left": {{trim_left}}, "trim_top": {{trim_top}}, "trim_right": {{trim_right}}, "trim_bottom": {{trim_bottom}}, "markers": [{{sprite_markers}}], "rotation": {{rotation}}}
+{"name": "{{name}}", "path": "{{path}}", "atlas_index": {{atlas_index}}, "rect": {"x": {{x}}, "y": {{y}}, "w": {{w}}, "h": {{h}}}, "pivot": {"x": {{pivot_x}}, "y": {{pivot_y}}}, "trim": {"left": {{trim_left}}, "top": {{trim_top}}, "right": {{trim_right}}, "bottom": {{trim_bottom}}}, "markers": [{{sprite_markers}}], "rotation": {{rotation}}}
   [/sprite]
 [/sprites]
 
@@ -62,14 +62,14 @@ extension=.json
 [if_markers]
 [/if_markers]
 
-[if_animations]
+[if has_animations="true"]
 ,
   "animations": [
-[/if_animations]
+[/if]
 
 [animations]
   [animation]
-    {"name": "{{animation_name}}", "fps": {{fps}}, "sprite_indexes": {{sprite_indexes}}}
+    {"name": "{{animation_name}}", "fps": {{fps}}, "sprite_indexes": {{sprite_indexes}}, "sprite_names": {{sprite_names}}}
   [/animation]
 [/animations]
 
@@ -81,8 +81,8 @@ extension=.json
   ]
 [/animations_footer]
 
-[if_no_animations]
-[/if_no_animations]
+[if has_animations="false"]
+[/if]
 
 [footer]
 }

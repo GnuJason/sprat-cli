@@ -311,6 +311,22 @@ target_compile_definitions(spratlayout PRIVATE
 
 # Keep a default profile config beside built binaries (e.g. build-win/) so
 # spratlayout can resolve it via exe-directory lookup without extra setup.
+# Use a single custom target for the transforms copy to prevent parallel copy races
+# when multiple executables complete simultaneously in a parallel build.
+# NOTE: Use a static path instead of $<TARGET_FILE_DIR:spratlayout> to avoid a
+# cyclic dependency (sprat_copy_transforms -> spratlayout -> sprat_copy_transforms).
+if(CMAKE_RUNTIME_OUTPUT_DIRECTORY)
+    set(_sprat_bin_dir ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+else()
+    set(_sprat_bin_dir ${CMAKE_CURRENT_BINARY_DIR})
+endif()
+add_custom_target(sprat_copy_transforms ALL
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_CURRENT_SOURCE_DIR}/transforms
+        ${_sprat_bin_dir}/transforms
+    COMMENT "Copying transforms/ to ${_sprat_bin_dir}"
+    VERBATIM)
+
 foreach(target spratlayout spratpack spratconvert spratframes spratunpack)
     add_custom_command(TARGET ${target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -318,12 +334,7 @@ foreach(target spratlayout spratpack spratconvert spratframes spratunpack)
             $<TARGET_FILE_DIR:${target}>/spratprofiles.cfg
         COMMENT "Copying spratprofiles.cfg to $<TARGET_FILE_DIR:${target}>"
         VERBATIM)
-    add_custom_command(TARGET ${target} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            ${CMAKE_CURRENT_SOURCE_DIR}/transforms
-            $<TARGET_FILE_DIR:${target}>/transforms
-        COMMENT "Copying transforms/ to $<TARGET_FILE_DIR:${target}>"
-        VERBATIM)
+    add_dependencies(${target} sprat_copy_transforms)
 
     if(WIN32)
         if(SPRAT_STATIC)
