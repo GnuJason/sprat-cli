@@ -1274,6 +1274,7 @@ fs::path g_exec_dir;
 
 std::optional<fs::path> resolve_user_transforms_dir() {
 #ifdef _WIN32
+    // Windows: %APPDATA%\sprat\transforms
     static const char* const envs[] = {"APPDATA", "LOCALAPPDATA"};
     for (const char* env : envs) {
         const char* val = std::getenv(env);
@@ -1285,37 +1286,51 @@ std::optional<fs::path> resolve_user_transforms_dir() {
             }
         }
     }
-#endif
-
+    return std::nullopt;
+#elif defined(__APPLE__)
+    // macOS: ~/Library/Application Support/sprat/transforms
     const char* home = std::getenv("HOME");
     if (home == nullptr || home[0] == '\0') {
         return std::nullopt;
     }
-
-#ifdef __APPLE__
-    const fs::path mac_dir = fs::path(home) / "Library" / "Preferences" / "sprat" / "transforms";
+    const fs::path mac_dir = fs::path(home) / "Library" / "Application Support" / "sprat" / "transforms";
     std::error_code ec_mac;
     if (fs::exists(mac_dir, ec_mac) && fs::is_directory(mac_dir, ec_mac)) {
         return mac_dir;
     }
-#endif
-
-    const fs::path home_dir = fs::path(home) / ".config" / "sprat" / "transforms";
+    return std::nullopt;
+#else
+    // Linux/other: $XDG_DATA_HOME/sprat/transforms (default ~/.local/share/sprat/transforms)
+    const char* home = std::getenv("HOME");
+    if (home == nullptr || home[0] == '\0') {
+        return std::nullopt;
+    }
+    const char* xdg_data_home = std::getenv("XDG_DATA_HOME");
+    const fs::path data_dir = (xdg_data_home != nullptr && xdg_data_home[0] != '\0')
+        ? fs::path(xdg_data_home) / "sprat" / "transforms"
+        : fs::path(home) / ".local" / "share" / "sprat" / "transforms";
     std::error_code ec;
-    if (fs::exists(home_dir, ec) && fs::is_directory(home_dir, ec)) {
-        return home_dir;
+    if (fs::exists(data_dir, ec) && fs::is_directory(data_dir, ec)) {
+        return data_dir;
     }
     return std::nullopt;
+#endif
 }
 
 fs::path find_transforms_dir() {
+    // Lookup order:
+    // 1) {exec_dir}/transforms (beside executable, portable install)
+    // 2) user data dir:
+    //      Windows:  %APPDATA%\sprat\transforms
+    //      macOS:    ~/Library/Application Support/sprat/transforms
+    //      Linux:    $XDG_DATA_HOME/sprat/transforms (default ~/.local/share/sprat/transforms)
+    // 3) global installed dir
     std::vector<fs::path> candidates;
-    candidates.emplace_back("transforms");
-    if (std::optional<fs::path> user_dir = resolve_user_transforms_dir()) {
-        candidates.push_back(*user_dir);
-    }
     if (!g_exec_dir.empty()) {
         candidates.push_back(g_exec_dir / "transforms");
+    }
+    if (std::optional<fs::path> user_dir = resolve_user_transforms_dir()) {
+        candidates.push_back(*user_dir);
     }
 #ifdef SPRAT_SOURCE_DIR
     candidates.push_back(fs::path(SPRAT_SOURCE_DIR) / "transforms");
@@ -1329,7 +1344,7 @@ fs::path find_transforms_dir() {
         }
     }
 
-    return fs::path("transforms");
+    return fs::path(SPRAT_GLOBAL_TRANSFORMS_DIR);
 }
 
 fs::path resolve_transform_path(const std::string& transform_arg) {

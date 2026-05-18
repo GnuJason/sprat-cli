@@ -118,7 +118,6 @@ struct ProfileDefinition {
 };
 
 constexpr const char* k_profiles_config_filename = "spratprofiles.cfg";
-constexpr const char* k_user_profiles_config_relpath = ".config/sprat/spratprofiles.cfg";
 constexpr const char* k_global_profiles_config_path = SPRAT_GLOBAL_PROFILE_CONFIG;
 constexpr const char k_default_profile_name[] = "fast";
 constexpr Mode k_default_mode = Mode::FAST;
@@ -572,8 +571,8 @@ bool load_profiles_config_from_file(const fs::path& path,
 }
 
 std::optional<fs::path> resolve_user_profiles_config_path() {
-    // 1. Windows: %APPDATA%\sprat or %LOCALAPPDATA%\sprat
 #ifdef _WIN32
+    // Windows: %APPDATA%\sprat\spratprofiles.cfg
     static const char* const envs[] = {"APPDATA", "LOCALAPPDATA"};
     for (const char* env : envs) {
         const char* val = std::getenv(env);
@@ -585,45 +584,51 @@ std::optional<fs::path> resolve_user_profiles_config_path() {
             }
         }
     }
-#endif
-
+    return std::nullopt;
+#elif defined(__APPLE__)
+    // macOS: ~/Library/Application Support/sprat/spratprofiles.cfg
     const char* home = std::getenv("HOME");
     if (home == nullptr || home[0] == '\0') {
         return std::nullopt;
     }
-
-    // 2. macOS: ~/Library/Preferences/sprat/spratprofiles.cfg
-#ifdef __APPLE__
-    const fs::path mac_cfg = fs::path(home) / "Library" / "Preferences" / "sprat" / k_profiles_config_filename;
+    const fs::path mac_cfg = fs::path(home) / "Library" / "Application Support" / "sprat" / k_profiles_config_filename;
     std::error_code ec_mac;
     if (fs::exists(mac_cfg, ec_mac) && !ec_mac) {
         return mac_cfg;
     }
-#endif
-
-    // 3. Others (Linux): ~/.config/sprat/spratprofiles.cfg
-    const fs::path home_cfg = fs::path(home) / k_user_profiles_config_relpath;
+    return std::nullopt;
+#else
+    // Linux/other: $XDG_CONFIG_HOME/sprat/spratprofiles.cfg (default ~/.config/sprat/)
+    const char* home = std::getenv("HOME");
+    if (home == nullptr || home[0] == '\0') {
+        return std::nullopt;
+    }
+    const char* xdg_config_home = std::getenv("XDG_CONFIG_HOME");
+    const fs::path cfg = (xdg_config_home != nullptr && xdg_config_home[0] != '\0')
+        ? fs::path(xdg_config_home) / "sprat" / k_profiles_config_filename
+        : fs::path(home) / ".config" / "sprat" / k_profiles_config_filename;
     std::error_code ec;
-    if (fs::exists(home_cfg, ec) && !ec) {
-        return home_cfg;
+    if (fs::exists(cfg, ec) && !ec) {
+        return cfg;
     }
     return std::nullopt;
+#endif
 }
 
-std::vector<fs::path> build_default_profiles_config_candidates(const fs::path& cwd, const fs::path& exec_dir) {
+std::vector<fs::path> build_default_profiles_config_candidates(const fs::path& exec_dir) {
     std::vector<fs::path> candidates;
     // Lookup order:
-    // 1) user config (Windows: %APPDATA%\sprat\spratprofiles.cfg,
-    //                 others: ~/.config/sprat/spratprofiles.cfg)
-    // 2) ./spratprofiles.cfg (current directory)
-    // 3) {exec_dir}/spratprofiles.cfg (beside executable)
-    // 4) global installed config
+    // 1) {exec_dir}/spratprofiles.cfg (beside executable, portable install)
+    // 2) user config:
+    //      Windows:  %APPDATA%\sprat\spratprofiles.cfg
+    //      macOS:    ~/Library/Application Support/sprat/spratprofiles.cfg
+    //      Linux:    $XDG_CONFIG_HOME/sprat/spratprofiles.cfg (default ~/.config/sprat/)
+    // 3) global installed config
+    if (!exec_dir.empty()) {
+        candidates.push_back(exec_dir / k_profiles_config_filename);
+    }
     if (std::optional<fs::path> user_config = resolve_user_profiles_config_path()) {
         candidates.push_back(*user_config);
-    }
-    candidates.push_back(cwd / k_profiles_config_filename);
-    if (exec_dir != cwd && !exec_dir.empty()) {
-        candidates.push_back(exec_dir / k_profiles_config_filename);
     }
     candidates.emplace_back(k_global_profiles_config_path);
     return candidates;
@@ -3284,9 +3289,8 @@ int run_spratlayout(int argc, char** argv) {
     }
 
     if (show_profiles_config) {
-        const fs::path cwd_local = fs::current_path();
         const fs::path exec_dir_local = sprat::core::get_executable_dir(argv[0]);
-        const auto candidates = build_default_profiles_config_candidates(cwd_local, exec_dir_local);
+        const auto candidates = build_default_profiles_config_candidates(exec_dir_local);
         for (const fs::path& candidate : candidates) {
             std::error_code ec;
             if (fs::exists(candidate, ec) && !ec) {
@@ -3294,9 +3298,7 @@ int run_spratlayout(int argc, char** argv) {
                 return 0;
             }
         }
-        if (!candidates.empty()) {
-            std::cout << candidates.front().string() << "\n";
-        }
+        std::cout << k_global_profiles_config_path << "\n";
         return 0;
     }
 
@@ -3362,7 +3364,7 @@ int run_spratlayout(int argc, char** argv) {
         }
         config_candidates.push_back(std::move(config_candidate));
     } else {
-        config_candidates = build_default_profiles_config_candidates(cwd, exec_dir);
+        config_candidates = build_default_profiles_config_candidates(exec_dir);
     }
 
     bool loaded_profile_file = false;

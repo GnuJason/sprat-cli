@@ -100,10 +100,8 @@ assert_matches_explicit() {
     fi
 }
 
-cleanup() {
-    rm -rf "$tmp_dir"
-}
-trap cleanup EXIT
+exe_dir="$(dirname "$spratlayout_bin")"
+exe_cfg="$exe_dir/spratprofiles.cfg"
 
 appdata_root="$tmp_dir/appdata"
 userprofile_root="$tmp_dir/userprofile"
@@ -111,23 +109,38 @@ home_root="$tmp_dir/home"
 mkdir -p "$appdata_root" "$userprofile_root" "$home_root"
 
 appdata_cfg="$appdata_root/sprat/spratprofiles.cfg"
-cwd_cfg="$tmp_dir/spratprofiles.cfg"
 
 export APPDATA="$(cygpath -m "$appdata_root")"
 export USERPROFILE="$(cygpath -m "$userprofile_root")"
 export HOME="$(cygpath -m "$home_root")"
 
-# 1) User config (APPDATA) should be preferred when present.
+# Save and remove any existing exe-dir config so we can control it during tests.
+exe_cfg_backed_up=0
+if [ -f "$exe_cfg" ]; then
+    cp "$exe_cfg" "${exe_cfg}.bak"
+    exe_cfg_backed_up=1
+    rm -f "$exe_cfg"
+fi
+
+cleanup() {
+    rm -rf "$tmp_dir"
+    if [ "$exe_cfg_backed_up" -eq 1 ]; then
+        mv "${exe_cfg}.bak" "$exe_cfg"
+    fi
+}
+trap cleanup EXIT
+
+# 1) Exe-dir config should be preferred over user config (APPDATA) when present.
+write_cfg "$exe_cfg" 2
 write_cfg "$appdata_cfg" 3
-write_cfg "$cwd_cfg" 7
+assert_matches_explicit "$exe_cfg" "exe_dir"
+
+# 2) User config (APPDATA) should be used when exe-dir config is absent.
+rm -f "$exe_cfg"
+write_cfg "$appdata_cfg" 5
 assert_matches_explicit "$appdata_cfg" "appdata"
 
-# 2) Current directory config should be used when user config is absent.
-rm -f "$appdata_cfg"
-write_cfg "$cwd_cfg" 7
-assert_matches_explicit "$cwd_cfg" "cwd"
-
-# 3) Precedence: APPDATA > current directory.
-write_cfg "$cwd_cfg" 9
-write_cfg "$appdata_cfg" 5
-assert_matches_explicit "$appdata_cfg" "precedence"
+# 3) Precedence: exe-dir > APPDATA.
+write_cfg "$appdata_cfg" 7
+write_cfg "$exe_cfg" 9
+assert_matches_explicit "$exe_cfg" "precedence"

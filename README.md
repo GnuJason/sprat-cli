@@ -205,10 +205,11 @@ Profiles are named rule sets that group packing options (mode, padding, scale, e
 
 Profile definitions are searched in:
 1. `--profiles-config PATH` (CLI override)
-2. User config:
-   - Linux/macOS: `~/.config/sprat/spratprofiles.cfg`
+2. `{exe_dir}/spratprofiles.cfg` (beside the executable, portable install)
+3. User config:
+   - Linux: `$XDG_CONFIG_HOME/sprat/spratprofiles.cfg` (default `~/.config/sprat/`)
+   - macOS: `~/Library/Application Support/sprat/spratprofiles.cfg`
    - Windows: `%APPDATA%\sprat\spratprofiles.cfg`
-3. `./spratprofiles.cfg` (current working directory)
 4. `/usr/local/share/sprat/spratprofiles.cfg` (Global)
 
 ### Spratlayout Options
@@ -503,12 +504,20 @@ Optional extra data files:
 ./build/spratconvert --transform json --markers markers.txt --animations animations.txt < layout.txt > layout.json
 ```
 
-Built-in transform files live in `transforms/`:
+Transform files are searched in:
+1. `{exe_dir}/transforms/` (beside the executable, portable install)
+2. User data dir:
+   - Linux: `$XDG_DATA_HOME/sprat/transforms/` (default `~/.local/share/sprat/transforms/`)
+   - macOS: `~/Library/Application Support/sprat/transforms/`
+   - Windows: `%APPDATA%\sprat\transforms\`
+3. `/usr/local/share/sprat/transforms/` (Global)
 
-- `transforms/json.transform`
-- `transforms/csv.transform`
-- `transforms/xml.transform`
-- `transforms/css.transform`
+Built-in transform files:
+
+- `json.transform`
+- `csv.transform`
+- `xml.transform`
+- `css.transform`
 
 The built-in JSON transform (`--transform json`) produces a top-level `atlases` array (each entry has `width`, `height`, `path`) and a flat top-level `sprites` array. Sprite spatial data is grouped into nested objects: `rect` (`x`, `y`, `w`, `h`), `pivot` (`x`, `y`), and `trim` (`left`, `top`, `right`, `bottom`). Use `atlas_index` in each sprite entry to associate it with an atlas when multipacking.
 
