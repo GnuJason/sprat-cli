@@ -1453,7 +1453,7 @@ void print_usage() {
               << tr("  --rotate                   Allow 90-degree sprite rotation during packing\n")
               << tr("  --multipack                Split into multiple atlases if they don't fit\n")
               << tr("  --deduplicate <mode>       Deduplication mode: none, exact, perceptual\n")
-              << tr("  --sort name|none           Order of sprites in layout (default: name for folders)\n")
+              << tr("  --sort name|none           Order of sprites in layout (default: none)\n")
               << tr("  --threads N                Number of worker threads\n")
               << tr("  --debug                    Enable detailed error reporting and debug visualization\n")
               << tr("  --help, -h                 Show this help message\n")
@@ -3631,13 +3631,9 @@ int run_spratlayout(int argc, char** argv) {
         }
     }
 
-    const bool is_stdin_or_list =
-        (input_context.type == InputType::ListFile || input_context.type == InputType::StdinTar);
     bool do_sort = false;
     if (has_frame_sort_override) {
         do_sort = (frame_sort == FrameSort::Name);
-    } else {
-        do_sort = !is_stdin_or_list;
     }
 
     const bool enforce_name_order = (has_frame_sort_override && frame_sort == FrameSort::Name);

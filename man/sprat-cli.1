@@ -3,7 +3,7 @@
 sprat-cli \- sprite atlas layout and packing pipeline
 .SH SYNOPSIS
 .B spratlayout
-.I folder
+.I folder|file|-
 [\fB\-\-profile\fR \fINAME\fR]
 [\fB\-\-profiles\-config\fR \fIPATH\fR]
 [\fB\-\-mode\fR compact|pot|fast]
@@ -12,7 +12,6 @@ sprat-cli \- sprite atlas layout and packing pipeline
 [\fB\-\-max\-height\fR \fIN\fR]
 [\fB\-\-padding\fR \fIN\fR]
 [\fB\-\-extrude\fR \fIN\fR]
-[\fB\-\-max\-combinations\fR \fIN\fR]
 [\fB\-\-source\-resolution\fR \fIWxH\fR]
 [\fB\-\-target\-resolution\fR \fIWxH\fR]
 [\fB\-\-resolution\-reference\fR largest|smallest]
@@ -62,20 +61,22 @@ sprat-cli \- sprite atlas layout and packing pipeline
 .SH DESCRIPTION
 \fBsprat\-cli\fR is a UNIX pipeline for generating sprite sheets and transforming layout metadata.
 .PP
-\fBspratlayout\fR scans an image folder/list/tar input and writes a text layout to standard output.
+\fBspratlayout\fR scans an image folder, list file, or TAR stream from stdin and writes a text layout to standard output.
 .PP
-\fBspratpack\fR reads the layout from standard input and writes one or more PNG atlases.
+\fBspratpack\fR reads the layout from standard input and writes one or more PNG atlases to standard output (or to files when \fB\-o\fR is used).
 .PP
-\fBspratconvert\fR reads the same layout format from standard input and transforms it into text formats (for example JSON, CSV, XML, CSS) using template-driven transforms.
+\fBspratconvert\fR reads the same layout format from standard input and transforms it into text formats (for example JSON, CSV, XML, CSS) using template-driven transforms, writing the result to standard output.
 .PP
 \fBspratframes\fR detects sprite rectangles in a sprite sheet and writes them to standard output in the spratframes format.
 .PP
-\fBspratunpack\fR extracts sprites from an atlas using a frames definition file. If no output directory is specified, it writes a TAR stream to stdout.
+\fBspratunpack\fR extracts sprites from an atlas using a frames definition file.
+Atlas input is a file path, \fB\-\fR for an explicit stdin read, or standard input when no atlas path is given.
+If \fB\-\-output\fR is not specified, extracted sprites are written as a TAR stream to standard output.
 .PP
 Normal output is written to stdout. Errors are written to stderr.
 .SH COMMANDS
 .SS spratlayout
-Reads image metadata from files in \fIfolder\fR and prints layout lines:
+Reads image metadata and prints layout lines to stdout:
 .PP
 atlas \fIwidth,height\fR
 .br
@@ -87,7 +88,13 @@ If \fB\-\-trim\-transparent\fR is enabled, trim offsets are included per sprite.
 .PP
 If rotation is used for a sprite, the sprite line includes the \fBrotated\fR token.
 .PP
-If \fIfolder\fR is actually a text file, it is treated as a newline-delimited list of image paths (comments starting with \fB#\fR and blank lines are ignored). Relative paths are resolved relative to the list file, and each path must point to an existing image or the command fails.
+Input modes:
+.IP "\(bu" 2
+\fBfolder\fR \(em scans all images in the directory.
+.IP "\(bu" 2
+\fBfile\fR \(em treated as a newline-delimited list of image paths when the argument points to a text file (comments starting with \fB#\fR and blank lines are ignored). Relative paths are resolved relative to the list file; each path must point to an existing image or the command fails.
+.IP "\(bu" 2
+\fB\-\fR \(em reads a TAR archive from standard input, extracts it to a temporary directory, and processes the contained images. Useful for piping the output of \fBspratunpack\fR (which writes a TAR stream) directly back into \fBspratlayout\fR.
 .PP
 Multipack:
 .IP "\(bu" 2
@@ -97,9 +104,11 @@ Profile configuration is loaded from the first existing file in this order:
 .IP "\(bu" 2
 \fB\-\-profiles\-config\fR path (when provided)
 .IP "\(bu" 2
-\fB~/.config/sprat/spratprofiles.cfg\fR (Linux/macOS) or \fB%APPDATA%\\sprat\\spratprofiles.cfg\fR (Windows)
+\fBspratprofiles.cfg\fR beside the executable (portable install)
 .IP "\(bu" 2
-\fB./spratprofiles.cfg\fR in the current working directory
+\fB$XDG_CONFIG_HOME/sprat/spratprofiles.cfg\fR (Linux, default \fB~/.config/sprat/\fR),
+\fB~/Library/Application Support/sprat/spratprofiles.cfg\fR (macOS), or
+\fB%APPDATA%\\sprat\\spratprofiles.cfg\fR (Windows)
 .IP "\(bu" 2
 Global installed config (typically \fB/usr/local/share/sprat/spratprofiles.cfg\fR)
 .PP
@@ -139,7 +148,8 @@ Reads layout text from stdin and writes transformed text to stdout.
 .PP
 Unsuffixed placeholders are auto-encoded based on output type inferred from transform metadata (\fBmeta.extension\fR) or transform name/argument.
 .PP
-Transforms can be selected by name from \fBtransforms/\fR (for example \fBjson\fR, \fBcsv\fR, \fBxml\fR, \fBcss\fR) or by path to a custom \fB.transform\fR file.
+Transforms can be selected by name (for example \fBjson\fR, \fBcsv\fR, \fBxml\fR, \fBcss\fR) or by path to a custom \fB.transform\fR file.
+Transform files are searched in the directory beside the executable, the user data directory, and the global install directory.
 .PP
 Optional \fB\-\-markers\fR and \fB\-\-animations\fR files can be loaded and referenced by transform placeholders.
 .PP
@@ -176,7 +186,7 @@ Typed placeholders (for example \fB{{name_json}}\fR, \fB{{marker_vertices_xml}}\
 The built-in JSON transform produces a top-level \fBatlases\fR array (each entry has \fBwidth\fR, \fBheight\fR, \fBpath\fR) and a flat top-level \fBsprites\fR array. Sprite spatial data is grouped into nested objects: \fBrect\fR (\fBx\fR, \fBy\fR, \fBw\fR, \fBh\fR), \fBpivot\fR (\fBx\fR, \fBy\fR), and \fBtrim\fR (\fBleft\fR, \fBtop\fR, \fBright\fR, \fBbottom\fR). Index fields are omitted from \fBsprites[]\fR and \fBanimations[]\fR entries.
 .SS spratframes
 Scans \fIinput_image\fR and detects sprite boundaries by finding non-transparent connected components or by detecting rectangles of a specific color.
-Prints layout-compatible lines:
+Prints layout-compatible lines to stdout:
 .PP
 path \fIinput_image\fR
 .br
@@ -185,8 +195,19 @@ path \fIinput_image\fR
 sprite \fIx,y\fR \fIw,h\fR
 .SS spratunpack
 Extracts individual sprites from an \fIatlas.png\fR using a frames definition (\fB.json\fR or \fB.spratframes\fR).
-Atlas input can be a file path, \fB\-\fR, or standard input (when no atlas path is given).
-If \fB\-\-frames\fR is not specified, it looks for \fB<atlas>.json\fR or \fB<atlas>.spratframes\fR (path input only).
+.PP
+Atlas input:
+.IP "\(bu" 2
+A file path reads the atlas from disk. If \fB\-\-frames\fR is not specified, it looks for \fB<atlas>.json\fR or \fB<atlas>.spratframes\fR alongside the atlas.
+.IP "\(bu" 2
+\fB\-\fR or omitting the atlas argument reads the atlas PNG from standard input. \fB\-\-frames\fR is required in this case.
+.PP
+Output:
+.IP "\(bu" 2
+If \fB\-\-output\fR is specified, extracted sprites are written as individual PNG files to that directory.
+.IP "\(bu" 2
+If \fB\-\-output\fR is omitted, sprites are written as a TAR stream to standard output, which can be piped to \fBspratlayout \-\fR for further processing.
+.PP
 Supports de-obfuscation of protected atlases (starting with "SPRAT!" signature).
 .SH OPTIONS
 .SS spratlayout
@@ -221,9 +242,6 @@ Extra pixels between packed sprites. Overrides profile value.
 \fB\-\-extrude\fR \fIN\fR
 Repeat edge pixels N times (padding should be >= extrude * 2).
 .TP
-\fB\-\-max\-combinations\fR \fIN\fR
-Maximum number of compact candidate combinations to test (\fB0\fR means auto/unlimited). Overrides profile value.
-.TP
 \fB\-\-source\-resolution\fR \fIWxH\fR
 Source design resolution baseline (for example \fB800x600\fR). Must be used together with \fB\-\-target\-resolution\fR.
 .TP
@@ -246,7 +264,7 @@ Enable 90-degree sprite rotation during packing (overrides profile value).
 Split into multiple atlases if they don't fit in the specified max dimensions.
 .TP
 \fB\-\-sort\fR name|none
-Order of sprites in layout. Default: \fBname\fR for folders, \fBnone\fR for list/stdin.
+Order of sprites in layout. \fBname\fR sorts by filename using natural ordering and enforces that order in the output regardless of packing optimizations. \fBnone\fR allows the packer to reorder sprites for better packing efficiency. Default: \fBnone\fR.
 .TP
 \fB\-\-threads\fR \fIN\fR
 Number of worker threads used during compact-mode packing (\fB\-\-preset quality\fR or \fB\-\-preset small\fR).
@@ -302,7 +320,7 @@ Enable detailed error reporting and debug visualization.
 .SS spratconvert
 .TP
 \fB\-\-transform\fR \fINAME|PATH\fR
-Transform name from \fBtransforms/\fR or path to a custom transform file. Default: \fBjson\fR.
+Transform name or path to a custom transform file. Default: \fBjson\fR.
 .TP
 \fB\-o\fR, \fB\-\-output\fR \fIPATTERN\fR
 Atlas path pattern used by \fB{{atlas_path}}\fR/\fB{{atlas_*}}\fR placeholders. Example: \fBatlas_%d.png\fR.
@@ -353,50 +371,62 @@ Number of worker threads for sprite extraction. Default: auto.
 Enable detailed error reporting.
 .SH EXAMPLES
 .TP
-Generate layout text:
+Generate a layout from a folder:
 .B spratlayout ./frames > layout.txt
 .TP
-Pack PNG from layout:
+Generate a layout from a list file:
+.B spratlayout frames.txt > layout.txt
+.TP
+Pack a PNG atlas from a layout file:
 .B spratpack < layout.txt > spritesheet.png
+.TP
+Full pipeline (layout and pack in one step):
+.B spratlayout ./frames | spratpack > spritesheet.png
 .TP
 Multipack to multiple files:
 .B spratlayout ./frames --multipack --max-width 1024 --max-height 1024 | spratpack -o atlas_%d.png
 .TP
-Transform layout to JSON with auto-animations:
+Convert layout to JSON:
+.B spratconvert --transform json < layout.txt > layout.json
+.TP
+Convert layout to JSON with auto-animations:
 .B spratconvert --transform json --auto-animations < layout.txt > layout.json
+.TP
+Convert layout with markers and animations:
+.B spratconvert --transform json --markers markers.txt --animations animations.txt < layout.txt > layout.json
+.TP
+Convert with a custom transform template:
+.B spratconvert --transform ./my.transform < layout.txt > layout.custom.txt
+.TP
+Full pipeline including conversion:
+.B spratlayout ./frames | tee layout.txt | spratconvert --transform json > layout.json && spratpack < layout.txt > spritesheet.png
+.TP
+Pack and convert in parallel from the same layout:
+.B spratlayout ./frames > layout.txt && spratpack < layout.txt > spritesheet.png && spratconvert < layout.txt > layout.json
 .TP
 Protect output atlas:
 .B spratpack --protect < layout.txt > protected.png
 .TP
-Unpack protected atlas:
-.B spratunpack protected.png --frames atlas.json --output ./extracted
+Unpack an atlas to a directory:
+.B spratunpack atlas.png --frames atlas.json --output ./extracted
 .TP
-Transform layout with custom template:
-.B spratconvert --transform ./my.transform < layout.txt > layout.custom.txt
+Unpack atlas to TAR stream (stdout):
+.B spratunpack atlas.png > sprites.tar
 .TP
-Transform layout with extra files:
-.B spratconvert --transform json --markers markers.txt --animations animations.txt < layout.txt > layout.json
+Unpack atlas from stdin to TAR stream:
+.B cat atlas.png | spratunpack --frames atlas.json > sprites.tar
 .TP
-Run as one pipeline:
-.B spratlayout ./frames --trim-transparent --padding 2 | spratpack > spritesheet.png
+Re-pack an unpacked atlas (round-trip via TAR stdin):
+.B spratunpack atlas.png | spratlayout - | spratpack > repacked.png
+.TP
+Pack frames from a TAR archive:
+.B tar cf - ./frames | spratlayout - | spratpack > spritesheet.png
 .TP
 Debug frame bounds:
 .B spratpack --frame-lines --line-width 2 --line-color 0,255,0 < layout.txt > spritesheet_lines.png
 .TP
-Limit worker threads:
-.B spratlayout ./frames --threads 4 > layout.txt ; spratpack --threads 4 < layout.txt > spritesheet.png
-.TP
 Detect sprites in a sheet:
 .B spratframes sheet.png > frames.spratframes
-.TP
-Unpack an atlas to a directory:
-.B spratunpack atlas.png --frames atlas.json --output ./extracted
-.TP
-Unpack atlas to TAR (stdout):
-.B spratunpack atlas.png > sprites.tar
-.TP
-Unpack atlas from stdin to TAR (stdout):
-.B cat atlas.png | spratunpack --frames atlas.json > sprites.tar
 .SH EXIT STATUS
 All commands return:
 .TP
