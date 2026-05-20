@@ -330,10 +330,12 @@ Print available transforms and exit.
 .TP
 \fB\-\-markers\fR \fIPATH\fR
 Load external markers plaintext file using the \fBpath\fR and \fB- marker\fR DSL.
+An optional \fBroot\fR directive sets a base directory; relative \fBpath\fR values are resolved against it.
 Supported marker types: \fBpoint\fR (\fBx,y\fR), \fBcircle\fR (\fBx,y radius\fR), \fBrectangle\fR (\fBx,y w,h\fR), \fBpolygon\fR (\fBx,y x,y ...\fR).
 .TP
 \fB\-\-animations\fR \fIPATH\fR
 Load external animations plaintext file using the \fBanimation\fR and \fB- frame\fR DSL.
+An optional \fBroot\fR directive sets a base directory; relative quoted frame paths are resolved against it.
 .TP
 \fB\-\-auto\-animations\fR
 Automatically group frames into animations by name pattern.
@@ -376,6 +378,9 @@ Generate a layout from a folder:
 .TP
 Generate a layout from a list file:
 .B spratlayout frames.txt > layout.txt
+.TP
+Exclude files from sync/watch regeneration:
+.B printf 'exclude "enemy.png"\n' > frames/.spratlayoutignore
 .TP
 Pack a PNG atlas from a layout file:
 .B spratpack < layout.txt > spritesheet.png

@@ -229,6 +229,7 @@ Profile definitions are searched in:
 - `--scale F`: Pre-scale images (0.0 to 1.0).
 - `--threads N`: Parallelize the packing search.
 - `--debug`: Enable detailed error reporting and debug visualization.
+- Directory inputs honor `.spratlayoutignore`; list files may include `exclude "path"` entries.
 
 ### Layout Caching
 `spratlayout` automatically caches image metadata in the system temp directory. If your source images haven't changed, subsequent runs will be nearly instantaneous. Entries older than one hour are pruned automatically.
@@ -568,6 +569,7 @@ Unsuffixed placeholders (for example `{{name}}`, `{{marker_name}}`, `{{marker_ve
 Sprite names default to the source file basename without extension (for example `./frames/run_01.png` becomes `run_01`).
 
 `--markers` expects a plaintext file using the `path` and `- marker` DSL.
+An optional `root` directive sets a base directory; `path` values that are relative are resolved against it.
 Supported marker types:
 - `point`: `x,y`
 - `circle`: `x,y radius`
@@ -576,7 +578,8 @@ Supported marker types:
 
 Example `markers.txt`:
 ```txt
-path "./frames/a.png"
+root "./frames"
+path "a.png"
 - marker "hit" point 3,5
 - marker "hurt" circle 6,7 4
 path "b"
@@ -584,12 +587,14 @@ path "b"
 ```
 
 `--animations` expects a plaintext file using the `animation` and `- frame` DSL. Frame entries are resolved to sprite indexes by path, name, or index.
+An optional `root` directive sets a base directory; quoted frame paths that are relative are resolved against it.
 
 Example `animations.txt`:
 ```txt
+root "./frames"
 fps 12
 animation "run" 8
-- frame "./frames/a.png"
+- frame "a.png"
 - frame "b"
 animation "idle"
 - frame 1

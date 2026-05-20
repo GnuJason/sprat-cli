@@ -677,6 +677,7 @@ std::vector<MarkerItem> parse_markers_data(const std::string& markers_text,
     std::istringstream iss(markers_text);
     std::string line;
     int current_sprite_index = -1;
+    std::string raw_root;
 
     while (std::getline(iss, line)) {
         std::string trimmed = trim_copy(line);
@@ -690,7 +691,16 @@ std::vector<MarkerItem> parse_markers_data(const std::string& markers_text,
             continue;
         }
 
-        if (cmd == "path") {
+        if (cmd == "root") {
+            size_t pos = 4;
+            while (pos < trimmed.size() && std::isspace(static_cast<unsigned char>(trimmed[pos]))) {
+                ++pos;
+            }
+            if (pos < trimmed.size() && trimmed[pos] == '"') {
+                std::string error;
+                parse_quoted(trimmed, pos, raw_root, error);
+            }
+        } else if (cmd == "path") {
             std::string path;
             size_t pos = trimmed.find("path") + 4;
             while (pos < trimmed.size() && std::isspace(static_cast<unsigned char>(trimmed[pos]))) {
@@ -699,10 +709,16 @@ std::vector<MarkerItem> parse_markers_data(const std::string& markers_text,
             if (pos < trimmed.size() && trimmed[pos] == '"') {
                 std::string error;
                 if (parse_quoted(trimmed, pos, path, error)) {
+                    if (!raw_root.empty() && fs::path(path).is_relative()) {
+                        path = (fs::path(raw_root) / path).string();
+                    }
                     current_sprite_index = resolve_sprite_index(path, by_path, by_name);
                 }
             } else {
                 if (liss >> path) {
+                    if (!raw_root.empty() && fs::path(path).is_relative()) {
+                        path = (fs::path(raw_root) / path).string();
+                    }
                     current_sprite_index = resolve_sprite_index(path, by_path, by_name);
                 }
             }
@@ -806,6 +822,7 @@ std::vector<AnimationItem> parse_animations_data(
     std::istringstream iss(animations_text);
     std::string line;
     AnimationItem* current_anim = nullptr;
+    std::string raw_root;
 
     while (std::getline(iss, line)) {
         std::string trimmed = trim_copy(line);
@@ -819,7 +836,16 @@ std::vector<AnimationItem> parse_animations_data(
             continue;
         }
 
-        if (cmd == "fps") {
+        if (cmd == "root") {
+            size_t pos = 4;
+            while (pos < trimmed.size() && std::isspace(static_cast<unsigned char>(trimmed[pos]))) {
+                ++pos;
+            }
+            if (pos < trimmed.size() && trimmed[pos] == '"') {
+                std::string error;
+                parse_quoted(trimmed, pos, raw_root, error);
+            }
+        } else if (cmd == "fps") {
             int fps = 0;
             if (liss >> fps) {
                 animation_fps_out = fps;
@@ -873,6 +899,9 @@ std::vector<AnimationItem> parse_animations_data(
                 std::string path;
                 std::string error;
                 if (parse_quoted(trimmed, pos, path, error)) {
+                    if (!raw_root.empty() && fs::path(path).is_relative()) {
+                        path = (fs::path(raw_root) / path).string();
+                    }
                     int idx = resolve_sprite_index(path, by_path, by_name);
                     if (idx >= 0) {
                         current_anim->sprite_indexes.push_back(idx);
@@ -884,6 +913,9 @@ std::vector<AnimationItem> parse_animations_data(
                     if (parse_int(frame_token, idx)) {
                         current_anim->sprite_indexes.push_back(idx);
                     } else {
+                        if (!raw_root.empty() && fs::path(frame_token).is_relative()) {
+                            frame_token = (fs::path(raw_root) / frame_token).string();
+                        }
                         idx = resolve_sprite_index(frame_token, by_path, by_name);
                         if (idx >= 0) {
                             current_anim->sprite_indexes.push_back(idx);

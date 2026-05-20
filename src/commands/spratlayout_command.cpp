@@ -94,6 +94,20 @@ std::string trim_copy(const std::string& s) {
     return s.substr(start, end - start);
 }
 
+std::string normalize_path_key(const fs::path& path) {
+    std::error_code ec;
+    fs::path absolute = fs::absolute(path, ec);
+    if (!ec) {
+        return absolute.lexically_normal().string();
+    }
+    return path.lexically_normal().string();
+}
+
+bool parse_quoted_path_argument(std::string_view input, size_t& pos, std::string& out) {
+    std::string error;
+    return sprat::core::parse_quoted(input, pos, out, error);
+}
+
 enum class Mode : std::uint8_t { POT, COMPACT, FAST };
 enum class OptimizeTarget : std::uint8_t { GPU, SPACE };
 enum class ResolutionReference : std::uint8_t { Largest, Smallest };
@@ -1456,6 +1470,7 @@ void print_usage() {
               << tr("  --sort name|none           Order of sprites in layout (default: none)\n")
               << tr("  --threads N                Number of worker threads\n")
               << tr("  --debug                    Enable detailed error reporting and debug visualization\n")
+              << tr("  Directory inputs honor .spratlayoutignore; list files may use exclude \"path\"\n")
               << tr("  --help, -h                 Show this help message\n")
               << tr("  --version, -v              Show version\n");
 }
@@ -2309,9 +2324,33 @@ bool rect_contains(const Rect& a, const Rect& b) {
            b.y + b.h <= a.y + a.h;
 }
 
+void append_pruned_free_rect(std::vector<Rect>& out, const Rect& candidate) {
+    if (candidate.w <= 0 || candidate.h <= 0) {
+        return;
+    }
+
+    for (const Rect& existing : out) {
+        if (rect_contains(existing, candidate)) {
+            return;
+        }
+    }
+
+    size_t write = 0;
+    for (size_t i = 0; i < out.size(); ++i) {
+        if (!rect_contains(candidate, out[i])) {
+            if (write != i) {
+                out[write] = out[i];
+            }
+            ++write;
+        }
+    }
+    out.resize(write);
+    out.push_back(candidate);
+}
+
 bool split_free_rect(const Rect& free_rect, const Rect& used_rect, std::vector<Rect>& out) {
     if (!rects_intersect(free_rect, used_rect)) {
-        out.push_back(free_rect);
+        append_pruned_free_rect(out, free_rect);
         return true;
     }
 
@@ -2321,60 +2360,26 @@ bool split_free_rect(const Rect& free_rect, const Rect& used_rect, std::vector<R
     int used_bottom = used_rect.y + used_rect.h;
 
     if (used_rect.x > free_rect.x) {
-        out.push_back({free_rect.x, free_rect.y, used_rect.x - free_rect.x, free_rect.h});
+        append_pruned_free_rect(out, {free_rect.x, free_rect.y, used_rect.x - free_rect.x, free_rect.h});
     }
     if (used_right < free_right) {
-        out.push_back({used_right, free_rect.y, free_right - used_right, free_rect.h});
+        append_pruned_free_rect(out, {used_right, free_rect.y, free_right - used_right, free_rect.h});
     }
     if (used_rect.y > free_rect.y) {
         int x0 = std::max(free_rect.x, used_rect.x);
         int x1 = std::min(free_right, used_right);
         if (x1 > x0) {
-            out.push_back({x0, free_rect.y, x1 - x0, used_rect.y - free_rect.y});
+            append_pruned_free_rect(out, {x0, free_rect.y, x1 - x0, used_rect.y - free_rect.y});
         }
     }
     if (used_bottom < free_bottom) {
         int x0 = std::max(free_rect.x, used_rect.x);
         int x1 = std::min(free_right, used_right);
         if (x1 > x0) {
-            out.push_back({x0, used_bottom, x1 - x0, free_bottom - used_bottom});
+            append_pruned_free_rect(out, {x0, used_bottom, x1 - x0, free_bottom - used_bottom});
         }
     }
     return true;
-}
-
-void prune_free_rects(std::vector<Rect>& free_rects, std::vector<bool>& dead) {
-    const size_t n = free_rects.size();
-    if (n <= 1) {
-        return;
-    }
-    dead.assign(n, false);
-    for (size_t i = 0; i < n; ++i) {
-        if (dead[i]) {
-            continue;
-        }
-        for (size_t j = i + 1; j < n; ++j) {
-            if (dead[j]) {
-                continue;
-            }
-            if (rect_contains(free_rects[i], free_rects[j])) {
-                dead[j] = true;
-            } else if (rect_contains(free_rects[j], free_rects[i])) {
-                dead[i] = true;
-                break;
-            }
-        }
-    }
-    size_t write = 0;
-    for (size_t i = 0; i < n; ++i) {
-        if (!dead[i]) {
-            if (write != i) {
-                free_rects[write] = free_rects[i];
-            }
-            ++write;
-        }
-    }
-    free_rects.resize(write);
 }
 
 bool pack_compact_maxrects(
@@ -2397,7 +2402,6 @@ bool pack_compact_maxrects(
     int used_w = 0;
     int used_h = 0;
     std::vector<Rect> next_free;
-    std::vector<bool> prune_dead;
 
     for (auto& s : sprites) {
         int rw = 0;
@@ -2500,17 +2504,6 @@ bool pack_compact_maxrects(
         }
 
         std::swap(free_rects, next_free);
-        size_t write = 0;
-        for (size_t ri = 0; ri < free_rects.size(); ++ri) {
-            if (free_rects[ri].w > 0 && free_rects[ri].h > 0) {
-                if (write != ri) {
-                    free_rects[write] = free_rects[ri];
-                }
-                ++write;
-            }
-        }
-        free_rects.resize(write);
-        prune_free_rects(free_rects, prune_dead);
     }
 
     out_width = used_w;
@@ -2543,7 +2536,6 @@ bool pack_compact_maxrects_partial(
     std::vector<Rect> free_rects;
     free_rects.push_back({0, 0, width_limit, max_height});
     std::vector<Rect> next_free;
-    std::vector<bool> prune_dead;
 
     for (const auto& src : sprites) {
         Sprite s = src;
@@ -2652,17 +2644,6 @@ bool pack_compact_maxrects_partial(
             }
         }
         std::swap(free_rects, next_free);
-        size_t write = 0;
-        for (size_t ri = 0; ri < free_rects.size(); ++ri) {
-            if (free_rects[ri].w > 0 && free_rects[ri].h > 0) {
-                if (write != ri) {
-                    free_rects[write] = free_rects[ri];
-                }
-                ++write;
-            }
-        }
-        free_rects.resize(write);
-        prune_free_rects(free_rects, prune_dead);
         out.packed.push_back(s);
     }
 
@@ -3550,12 +3531,93 @@ int run_spratlayout(int argc, char** argv) {
     prune_cache_family(cache_path, k_cache_max_age_seconds, k_cache_max_layout_files, k_cache_max_seed_files);
 
     std::vector<ImageSource> sources;
+    std::unordered_set<std::string> excluded_source_paths;
+    auto add_excluded_source = [&](const fs::path& path, const std::string* relative_key = nullptr) {
+        excluded_source_paths.insert(normalize_path_key(path));
+        if (relative_key != nullptr && !relative_key->empty()) {
+            excluded_source_paths.insert(*relative_key);
+        }
+    };
+    auto is_excluded_source = [&](const fs::path& path, const fs::path* root) {
+        if (excluded_source_paths.contains(normalize_path_key(path))) {
+            return true;
+        }
+        if (root != nullptr) {
+            std::error_code ec;
+            fs::path relative = fs::relative(path, *root, ec);
+            if (!ec && excluded_source_paths.contains(relative.lexically_normal().string())) {
+                return true;
+            }
+        }
+        return false;
+    };
+    auto load_exclusion_file = [&](const fs::path& file_path, const fs::path& base_root, bool strict) -> bool {
+        std::ifstream in(file_path);
+        if (!in) {
+            return !strict;
+        }
+        std::string line;
+        size_t line_number = 0;
+        while (std::getline(in, line)) {
+            ++line_number;
+            std::string trimmed = trim_copy(line);
+            if (trimmed.empty() || trimmed.front() == '#') {
+                continue;
+            }
+
+            std::string path_text;
+            if (trimmed.size() >= 7 && trimmed.compare(0, 7, "exclude") == 0 &&
+                (trimmed.size() == 7 || std::isspace(static_cast<unsigned char>(trimmed[7])))) {
+                size_t pos = 7;
+                while (pos < trimmed.size() && std::isspace(static_cast<unsigned char>(trimmed[pos])) != 0) {
+                    ++pos;
+                }
+                if (pos < trimmed.size() && trimmed[pos] == '"') {
+                    if (!parse_quoted_path_argument(trimmed, pos, path_text)) {
+                        if (strict) {
+                            std::cerr << tr("Invalid exclude path at line ") << line_number
+                                      << tr(": ") << to_quoted(trimmed) << "\n";
+                            return false;
+                        }
+                        continue;
+                    }
+                } else if (pos < trimmed.size()) {
+                    path_text = trimmed.substr(pos);
+                }
+            } else {
+                path_text = trimmed;
+            }
+
+            if (path_text.empty()) {
+                if (strict) {
+                    std::cerr << tr("Invalid exclude path at line ") << line_number
+                              << tr(": ") << to_quoted(trimmed) << "\n";
+                    return false;
+                }
+                continue;
+            }
+
+            fs::path excluded_path(path_text);
+            std::optional<std::string> relative_key;
+            if (excluded_path.is_relative()) {
+                relative_key = excluded_path.lexically_normal().string();
+                excluded_path = base_root / excluded_path;
+            }
+            add_excluded_source(excluded_path, relative_key ? &*relative_key : nullptr);
+        }
+        return true;
+    };
     auto add_source = [&](const fs::path& image_path, bool strict) -> bool {
         if (!is_supported_image_extension(image_path)) {
             if (strict) {
                 std::cerr << tr("Invalid extension in list input: ") << to_quoted(image_path) << "\n";
                 return false;
             }
+            return true;
+        }
+        const fs::path* exclusion_root =
+            input_context.type == InputType::Directory ? &input_context.working_folder : nullptr;
+        if (is_excluded_source(image_path, exclusion_root)) {
             return true;
         }
         ImageMeta meta;
@@ -3575,7 +3637,8 @@ int run_spratlayout(int argc, char** argv) {
     };
 
     if (input_context.type == InputType::Directory) {
-        for (const auto& entry : fs::directory_iterator(input_context.working_folder)) {
+        load_exclusion_file(input_context.working_folder / ".spratlayoutignore", input_context.working_folder, false);
+        for (const auto& entry : fs::recursive_directory_iterator(input_context.working_folder)) {
             if (!entry.is_regular_file()) {
                 continue;
             }
@@ -3611,15 +3674,68 @@ int run_spratlayout(int argc, char** argv) {
         }
         std::string line;
         size_t line_number = 0;
+        fs::path list_root; // optional root override from "root" directive
         while (std::getline(list_file, line)) {
             ++line_number;
             std::string trimmed = trim_copy(line);
             if (trimmed.empty() || trimmed.front() == '#') {
                 continue;
             }
+            if (trimmed.size() >= 7 && trimmed.compare(0, 7, "exclude") == 0 &&
+                (trimmed.size() == 7 || std::isspace(static_cast<unsigned char>(trimmed[7])))) {
+                size_t pos = 7;
+                while (pos < trimmed.size() && std::isspace(static_cast<unsigned char>(trimmed[pos])) != 0) {
+                    ++pos;
+                }
+                std::string excluded_path_text;
+                if (pos < trimmed.size() && trimmed[pos] == '"') {
+                    std::string error;
+                    if (!sprat::core::parse_quoted(trimmed, pos, excluded_path_text, error)) {
+                        std::cerr << tr("Invalid exclude path at line ") << line_number << tr(": ") << error << "\n";
+                        return 1;
+                    }
+                } else if (pos < trimmed.size()) {
+                    excluded_path_text = trimmed.substr(pos);
+                }
+                if (excluded_path_text.empty()) {
+                    std::cerr << tr("Invalid exclude path at line ") << line_number << tr(": ") << to_quoted(trimmed) << "\n";
+                    return 1;
+                }
+                fs::path excluded_path(excluded_path_text);
+                if (excluded_path.is_relative()) {
+                    const fs::path& base = !list_root.empty() ? list_root
+                                                              : input_context.working_folder.parent_path();
+                    excluded_path = base / excluded_path;
+                }
+                add_excluded_source(excluded_path);
+                continue;
+            }
+            // "root <path>" directive: sets the base directory for resolving relative paths
+            if (trimmed.size() >= 4 && trimmed.compare(0, 4, "root") == 0 &&
+                (trimmed.size() == 4 || std::isspace(static_cast<unsigned char>(trimmed[4])))) {
+                size_t pos = 4;
+                while (pos < trimmed.size() && std::isspace(static_cast<unsigned char>(trimmed[pos]))) ++pos;
+                std::string root_str;
+                if (pos < trimmed.size() && trimmed[pos] == '"') {
+                    std::string error;
+                    sprat::core::parse_quoted(trimmed, pos, root_str, error);
+                } else if (pos < trimmed.size()) {
+                    root_str = trimmed.substr(pos);
+                }
+                if (!root_str.empty()) {
+                    fs::path rp(root_str);
+                    if (rp.is_relative()) {
+                        rp = input_context.working_folder.parent_path() / rp;
+                    }
+                    list_root = rp;
+                }
+                continue;
+            }
             fs::path entry_path(trimmed);
             if (entry_path.is_relative()) {
-                entry_path = input_context.working_folder.parent_path() / entry_path;
+                const fs::path& base = !list_root.empty() ? list_root
+                                                           : input_context.working_folder.parent_path();
+                entry_path = base / entry_path;
             }
             if (!fs::exists(entry_path) || !fs::is_regular_file(entry_path)) {
                 std::cerr << tr("Invalid image path at line ") << line_number << tr(": ") << to_quoted(trimmed) << "\n";
@@ -3677,19 +3793,36 @@ int run_spratlayout(int argc, char** argv) {
     load_image_cache(cache_path, cache_entries);
     prune_stale_cache_entries(cache_entries, now_unix, k_cache_max_age_seconds);
 
-    std::vector<Sprite> sprites;
-    for (const auto& source : sources) {
+    struct SpriteLoadResult {
+        bool ok = false;
+        bool from_cache = false;
+        bool failed = false;
+        std::string fail_reason;
+        Sprite sprite;
+        std::string cache_key;
+        ImageCacheEntry new_entry;
+    };
+
+    const size_t source_count = sources.size();
+    std::vector<SpriteLoadResult> load_results(source_count);
+
+    auto process_source = [&](size_t i) {
+        const auto& source = sources[i];
         const std::string& path = source.path;
         const ImageMeta& meta = source.meta;
+        SpriteLoadResult& result = load_results[i];
 
         const std::string cache_key = path + (trim_transparent ? "|1" : "|0");
+        result.cache_key = cache_key;
+
+        // Step 4a: cache hit
         auto cache_it = cache_entries.find(cache_key);
         if (cache_it != cache_entries.end()) {
             const ImageCacheEntry& cached = cache_it->second;
             if (cached.trim_transparent == trim_transparent &&
                 cached.file_size == meta.file_size &&
                 cached.mtime_ticks == meta.mtime_ticks) {
-                // Step 4a: if deduplication is requested and the relevant hash is missing,
+                // If deduplication is requested and the relevant hash is missing,
                 // fall through to reload so we can compute the hash.
                 bool need_hash = false;
                 if (deduplicateMode == "exact" && cached.content_hash == 0) {
@@ -3706,9 +3839,10 @@ int run_spratlayout(int argc, char** argv) {
                     s.trim_top = cached.trim_top;
                     s.trim_right = cached.trim_right;
                     s.trim_bottom = cached.trim_bottom;
-                    sprites.push_back(std::move(s));
-                    cache_it->second.cached_at_unix = now_unix;
-                    continue;
+                    result.ok = true;
+                    result.from_cache = true;
+                    result.sprite = std::move(s);
+                    return;
                 }
             }
         }
@@ -3725,7 +3859,9 @@ int run_spratlayout(int argc, char** argv) {
                 int channels = 0;
                 unsigned char* px = stbi_load(path.c_str(), &w, &h, &channels, 4);
                 if (px == nullptr) {
-                    continue;
+                    result.failed = true;
+                    result.fail_reason = stbi_failure_reason();
+                    return;
                 }
                 // FNV-1a over the full RGBA buffer
                 const size_t nbytes = static_cast<size_t>(w) * static_cast<size_t>(h) * 4;
@@ -3740,13 +3876,16 @@ int run_spratlayout(int argc, char** argv) {
             } else {
                 int channels = 0;
                 if (stbi_info(path.c_str(), &w, &h, &channels) == 0) {
-                    continue;
+                    result.failed = true;
+                    result.fail_reason = stbi_failure_reason();
+                    return;
                 }
             }
             loaded_sprite.w = w;
             loaded_sprite.h = h;
-            sprites.push_back(loaded_sprite);
-            cache_entries[cache_key] = {
+            result.ok = true;
+            result.sprite = loaded_sprite;
+            result.new_entry = {
                 .trim_transparent=trim_transparent,
                 .file_size=meta.file_size,
                 .mtime_ticks=meta.mtime_ticks,
@@ -3760,7 +3899,7 @@ int run_spratlayout(int argc, char** argv) {
                 .content_hash=entry_content_hash,
                 .perceptual_hash=entry_perceptual_hash
             };
-            continue;
+            return;
         }
 
         int w = 0;
@@ -3768,8 +3907,9 @@ int run_spratlayout(int argc, char** argv) {
         int channels = 0;
         unsigned char* data = stbi_load(path.c_str(), &w, &h, &channels, 4);
         if (data == nullptr) {
-            std::cerr << tr("Warning: Failed to load sprite ") << to_quoted(path) << tr(" (Reason: ") << stbi_failure_reason() << tr(")\n");
-            continue;
+            result.failed = true;
+            result.fail_reason = stbi_failure_reason();
+            return;
         }
 
         int min_x = 0;
@@ -3829,8 +3969,9 @@ int run_spratlayout(int argc, char** argv) {
         }
 
         stbi_image_free(data);
-        sprites.push_back(loaded_sprite);
-        cache_entries[cache_key] = {
+        result.ok = true;
+        result.sprite = loaded_sprite;
+        result.new_entry = {
             .trim_transparent=trim_transparent,
             .file_size=meta.file_size,
             .mtime_ticks=meta.mtime_ticks,
@@ -3844,6 +3985,52 @@ int run_spratlayout(int argc, char** argv) {
             .content_hash=entry_content_hash,
             .perceptual_hash=entry_perceptual_hash
         };
+    };
+
+    unsigned int load_worker_count =
+        thread_limit > 0 ? thread_limit : std::thread::hardware_concurrency();
+    if (load_worker_count == 0) load_worker_count = 1;
+#ifdef __EMSCRIPTEN__
+    load_worker_count = 1;
+#endif
+    load_worker_count = std::min<unsigned int>(
+        load_worker_count, static_cast<unsigned int>(source_count));
+
+    if (load_worker_count <= 1 || source_count <= 1) {
+        for (size_t i = 0; i < source_count; ++i) process_source(i);
+    } else {
+        std::vector<std::thread> workers;
+        workers.reserve(load_worker_count);
+        for (unsigned int wi = 0; wi < load_worker_count; ++wi) {
+            workers.emplace_back([&, wi]() {
+                const size_t begin = (source_count * wi) / load_worker_count;
+                const size_t end   = (source_count * (wi + 1)) / load_worker_count;
+                for (size_t i = begin; i < end; ++i) process_source(i);
+            });
+        }
+        for (auto& t : workers) t.join();
+    }
+
+    // Serial collection pass: merge results in source order.
+    // cache_entries writes are deferred here to avoid concurrent map mutations.
+    std::vector<Sprite> sprites;
+    sprites.reserve(source_count);
+    for (size_t i = 0; i < source_count; ++i) {
+        const SpriteLoadResult& r = load_results[i];
+        if (r.failed) {
+            std::cerr << tr("Warning: Failed to load sprite ")
+                      << to_quoted(sources[i].path)
+                      << tr(" (Reason: ") << r.fail_reason << tr(")\n");
+            continue;
+        }
+        if (!r.ok) continue;
+        sprites.push_back(r.sprite);
+        if (r.from_cache) {
+            auto it = cache_entries.find(r.cache_key);
+            if (it != cache_entries.end()) it->second.cached_at_unix = now_unix;
+        } else {
+            cache_entries[r.cache_key] = r.new_entry;
+        }
     }
 
     save_image_cache(cache_path, cache_entries);
@@ -4386,7 +4573,45 @@ int run_spratlayout(int argc, char** argv) {
                 worker_count = std::min<unsigned int>(worker_count, static_cast<unsigned int>(width_candidates.size()));
                 std::vector<LayoutCandidate> worker_gpu(worker_count);
                 std::vector<LayoutCandidate> worker_space(worker_count);
-                auto run_guided_worker = [&](size_t begin, size_t end, LayoutCandidate& out_gpu, LayoutCandidate& out_space) {
+                const int min_square_side =
+                    total_area > 0
+                        ? static_cast<int>(std::ceil(std::sqrt(static_cast<long double>(total_area))))
+                        : 0;
+                auto select_better_candidate = [&](const LayoutCandidate& local_best, const LayoutCandidate& shared_best, OptimizeTarget target) -> const LayoutCandidate* {
+                    if (!local_best.valid) {
+                        return shared_best.valid ? &shared_best : nullptr;
+                    }
+                    if (!shared_best.valid) {
+                        return &local_best;
+                    }
+                    if (pick_better_layout_candidate(
+                            local_best.area, local_best.w, local_best.h, true,
+                            shared_best.area, shared_best.w, shared_best.h,
+                            target)) {
+                        return &local_best;
+                    }
+                    return &shared_best;
+                };
+                auto width_could_beat_best = [&](int width, const LayoutCandidate& local_best, const LayoutCandidate& shared_best, OptimizeTarget target) {
+                    const LayoutCandidate* best = select_better_candidate(local_best, shared_best, target);
+                    if (best == nullptr || total_area == 0) {
+                        return true;
+                    }
+                    const size_t width_size = static_cast<size_t>(width);
+                    const size_t min_height_size = (total_area + width_size - 1) / width_size;
+                    if (min_height_size > static_cast<size_t>(std::numeric_limits<int>::max())) {
+                        return false;
+                    }
+                    const int min_height = static_cast<int>(min_height_size);
+                    const int min_max_side = std::max(min_square_side, min_height);
+                    const int optimistic_w = std::min(width, min_max_side);
+                    const int optimistic_h = min_max_side;
+                    return pick_better_layout_candidate(
+                        total_area, optimistic_w, optimistic_h, true,
+                        best->area, best->w, best->h,
+                        target);
+                };
+                auto run_guided_worker = [&](std::atomic<size_t>* next_width_index, size_t begin, size_t end, LayoutCandidate& out_gpu, LayoutCandidate& out_space) {
                     LayoutCandidate local_best_gpu;
                     LayoutCandidate local_best_space;
                     auto consider_local = [&](LayoutCandidate&& candidate) {
@@ -4421,8 +4646,27 @@ int run_spratlayout(int argc, char** argv) {
                     };
 
                     std::vector<Sprite> trial_sprites;
-                    for (size_t width_index = begin; width_index < end; ++width_index) {
+                    std::vector<Sprite> shelf_sprites;
+                    while (true) {
+                        size_t width_index = begin;
+                        if (next_width_index != nullptr) {
+                            width_index = next_width_index->fetch_add(1, std::memory_order_relaxed);
+                            if (width_index >= end) {
+                                break;
+                            }
+                        } else if (width_index < end) {
+                            ++begin;
+                        } else {
+                            break;
+                        }
+
                         const int width = width_candidates[width_index];
+                        if (!width_could_beat_best(width, local_best_gpu, best_gpu_candidate, OptimizeTarget::GPU) &&
+                            !width_could_beat_best(width, local_best_space, best_space_candidate, OptimizeTarget::SPACE)) {
+                            continue;
+                        }
+
+                        bool continue_width_search = true;
                         for (size_t sort_idx : k_guided_sort_indices) {
                             if (enforce_name_order && sort_idx != k_sort_mode_index_none) {
                                 continue;
@@ -4443,87 +4687,16 @@ int run_spratlayout(int argc, char** argv) {
                                 candidate.h = used_h;
                                 candidate.sprites = std::move(trial_sprites);
                                 consider_local(std::move(candidate));
+                                if (!width_could_beat_best(width, local_best_gpu, best_gpu_candidate, OptimizeTarget::GPU) &&
+                                    !width_could_beat_best(width, local_best_space, best_space_candidate, OptimizeTarget::SPACE)) {
+                                    continue_width_search = false;
+                                    break;
+                                }
                             }
-                        }
-                    }
-
-                    out_gpu = std::move(local_best_gpu);
-                    out_space = std::move(local_best_space);
-                };
-
-                if (worker_count == 1) {
-                    run_guided_worker(0, width_candidates.size(), worker_gpu[0], worker_space[0]);
-                } else {
-                    std::vector<std::thread> workers;
-                    workers.reserve(worker_count);
-                    for (unsigned int worker_index = 0; worker_index < worker_count; ++worker_index) {
-                        workers.emplace_back([&, worker_index]() {
-                            const size_t begin = (width_candidates.size() * worker_index) / worker_count;
-                            const size_t end = (width_candidates.size() * (worker_index + 1)) / worker_count;
-                            run_guided_worker(begin, end, worker_gpu[worker_index], worker_space[worker_index]);
-                        });
-                    }
-                    for (auto& worker : workers) {
-                        worker.join();
-                    }
-                }
-                for (unsigned int i = 0; i < worker_count; ++i) {
-                    if (worker_gpu[i].valid) {
-                        consider_candidate(std::move(worker_gpu[i]));
-                    }
-                    if (worker_space[i].valid) {
-                        consider_candidate(std::move(worker_space[i]));
-                    }
-                }
-
-            }
-
-            // Include shelf candidates from same guided widths as a cheap fallback.
-            if (!width_candidates.empty()) {
-                worker_count = std::min<unsigned int>(worker_count, static_cast<unsigned int>(width_candidates.size()));
-                std::vector<LayoutCandidate> worker_gpu(worker_count);
-                std::vector<LayoutCandidate> worker_space(worker_count);
-                auto run_shelf_worker = [&](size_t begin, size_t end, LayoutCandidate& out_gpu, LayoutCandidate& out_space) {
-                    LayoutCandidate local_best_gpu;
-                    LayoutCandidate local_best_space;
-                    auto consider_local = [&](LayoutCandidate&& candidate) {
-                        if (!candidate.valid || candidate.w <= 0 || candidate.h <= 0) {
-                            return;
-                        }
-                        const bool better_gpu =
-                            !local_best_gpu.valid ||
-                            pick_better_layout_candidate(
-                                candidate.area, candidate.w, candidate.h, true,
-                                local_best_gpu.area, local_best_gpu.w, local_best_gpu.h,
-                                OptimizeTarget::GPU);
-                        const bool better_space =
-                            !local_best_space.valid ||
-                            pick_better_layout_candidate(
-                                candidate.area, candidate.w, candidate.h, true,
-                                local_best_space.area, local_best_space.w, local_best_space.h,
-                                OptimizeTarget::SPACE);
-                        if (!better_gpu && !better_space) {
-                            return;
-                        }
-                        if (better_gpu && better_space) {
-                            local_best_gpu = std::move(candidate);
-                            local_best_space = local_best_gpu;
-                            return;
-                        }
-                        if (better_gpu) {
-                            local_best_gpu = std::move(candidate);
-                            return;
-                        }
-                        local_best_space = std::move(candidate);
-                    };
-
-                    std::vector<Sprite> shelf_sprites;
-                    for (size_t width_index = begin; width_index < end; ++width_index) {
-                        const int width = width_candidates[width_index];
-                        for (size_t sort_idx : k_guided_sort_indices) {
-                            if (enforce_name_order && sort_idx != k_sort_mode_index_none) {
-                                continue;
+                            if (!continue_width_search) {
+                                break;
                             }
+
                             shelf_sprites.assign(sorted_sprites_by_mode[sort_idx].begin(), sorted_sprites_by_mode[sort_idx].end());
                             int shelf_w = 0;
                             int shelf_h = 0;
@@ -4541,6 +4714,10 @@ int run_spratlayout(int argc, char** argv) {
                             shelf_candidate.h = shelf_h;
                             shelf_candidate.sprites = std::move(shelf_sprites);
                             consider_local(std::move(shelf_candidate));
+                            if (!width_could_beat_best(width, local_best_gpu, best_gpu_candidate, OptimizeTarget::GPU) &&
+                                !width_could_beat_best(width, local_best_space, best_space_candidate, OptimizeTarget::SPACE)) {
+                                break;
+                            }
                         }
                     }
 
@@ -4549,15 +4726,14 @@ int run_spratlayout(int argc, char** argv) {
                 };
 
                 if (worker_count == 1) {
-                    run_shelf_worker(0, width_candidates.size(), worker_gpu[0], worker_space[0]);
+                    run_guided_worker(nullptr, 0, width_candidates.size(), worker_gpu[0], worker_space[0]);
                 } else {
+                    std::atomic<size_t> next_width_index{0};
                     std::vector<std::thread> workers;
                     workers.reserve(worker_count);
                     for (unsigned int worker_index = 0; worker_index < worker_count; ++worker_index) {
                         workers.emplace_back([&, worker_index]() {
-                            const size_t begin = (width_candidates.size() * worker_index) / worker_count;
-                            const size_t end = (width_candidates.size() * (worker_index + 1)) / worker_count;
-                            run_shelf_worker(begin, end, worker_gpu[worker_index], worker_space[worker_index]);
+                            run_guided_worker(&next_width_index, 0, width_candidates.size(), worker_gpu[worker_index], worker_space[worker_index]);
                         });
                     }
                     for (auto& worker : workers) {

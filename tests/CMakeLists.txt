@@ -103,3 +103,23 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/compact_seed_search_regression_test.sh")
 else()
     message(WARNING "Skipping compact_seed_search_regression test: script not found")
 endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/recursive_dir_test.sh")
+    add_test(
+        NAME recursive_dir
+        COMMAND ${BASH_EXE} ${CMAKE_CURRENT_SOURCE_DIR}/recursive_dir_test.sh
+                $<TARGET_FILE:spratlayout>
+    )
+else()
+    message(WARNING "Skipping recursive_dir test: script not found")
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/spratlayout_exclude_test.sh")
+    add_test(
+        NAME spratlayout_exclude
+        COMMAND ${BASH_EXE} ${CMAKE_CURRENT_SOURCE_DIR}/spratlayout_exclude_test.sh
+                $<TARGET_FILE:spratlayout>
+    )
+else()
+    message(WARNING "Skipping spratlayout_exclude test: script not found")
+endif()
