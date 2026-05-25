@@ -408,4 +408,66 @@ grep -q '"name": "run"' "$tmp_dir/out.alias.json"
 grep -q '"fps": 8' "$tmp_dir/out.alias.json"
 grep -q '"sprite_indexes": \[0,1\]' "$tmp_dir/out.alias.json"
 
+# --- --output-dir group mode test ---
+# Create two lightweight group transforms in the active transforms directory.
+transforms_dir="$("$convert_bin" --transforms-dir)"
+grp_a="$transforms_dir/tstsuite.txt.transform"
+grp_b="$transforms_dir/tstsuite.json.transform"
+trap 'rm -rf "$tmp_dir"; rm -f "$grp_a" "$grp_b"' EXIT
+
+cat > "$grp_a" <<'GRPA'
+[meta]
+name=tstsuite_txt
+extension=.txt
+[/meta]
+
+[header]
+stem={{output_stem}}
+[/header]
+
+[sprites]
+  [sprite]
+{{name}}
+  [/sprite]
+[/sprites]
+GRPA
+
+cat > "$grp_b" <<'GRPB'
+[meta]
+name=tstsuite_json
+extension=.json
+[/meta]
+
+[header]
+{"stem":"{{output_stem}}","sprites":[
+[/header]
+
+[sprites]
+  [sprite]
+"{{name}}"
+  [/sprite]
+[/sprites]
+
+[separator]
+,
+[/separator]
+
+[footer]
+]}
+[/footer]
+GRPB
+
+group_out="$tmp_dir/group_out"
+"$convert_bin" --transform tstsuite --output-dir "$(fix_path "$group_out")" < "$layout_file"
+test -f "$group_out/txt.txt"
+test -f "$group_out/json.json"
+grep -q 'stem=txt' "$group_out/txt.txt"
+grep -q '"stem":"json"' "$group_out/json.json"
+
+# --output-dir single mode: write to file using stem-derived name
+single_out="$tmp_dir/single_out"
+"$convert_bin" --transform tstsuite.json --output-dir "$(fix_path "$single_out")" < "$layout_file"
+test -f "$single_out/json.json"
+grep -q '"stem":"json"' "$single_out/json.json"
+
 echo "convert_test.sh: ok"

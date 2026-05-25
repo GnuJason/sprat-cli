@@ -1,0 +1,62 @@
+[meta]
+name=Aseprite
+description=Aseprite JSON Array sprite sheet format (frameTags populated when animations are present)
+extension=.json
+[/meta]
+
+[header]
+{ "frames": [
+
+[/header]
+
+[sprite]
+    {"filename": "{{name}}", "frame": {"x": {{x}}, "y": {{y}}, "w": {{w}}, "h": {{h}}}, "rotated": {{rotated}}, "trimmed": {{has_trim}}, "spriteSourceSize": {"x": {{trim_left}}, "y": {{trim_top}}, "w": {{w}}, "h": {{h}}}, "sourceSize": {"w": {{source_w}}, "h": {{source_h}}}, "duration": 100}
+[/sprite]
+
+[separator]
+,
+[/separator]
+
+[if_animations]
+ ],
+ "meta": {
+  "app": "http://www.aseprite.org/",
+  "version": "1.3",
+  "image": "{{output_pattern}}",
+  "format": "RGBA8888",
+  "size": {"w": {{atlas_width}}, "h": {{atlas_height}}},
+  "scale": "{{scale}}",
+  "frameTags": [
+[/if_animations]
+
+[animation]
+    {"name": "{{animation_name}}", "from": {{animation_from}}, "to": {{animation_to}}, "direction": "forward"}
+[/animation]
+
+[animations_separator]
+,
+[/animations_separator]
+
+[animations_footer]
+ ],
+  "layers": [],
+  "slices": []
+ }
+}
+[/animations_footer]
+
+[if_no_animations]
+ ],
+ "meta": {
+  "app": "http://www.aseprite.org/",
+  "version": "1.3",
+  "image": "{{output_pattern}}",
+  "format": "RGBA8888",
+  "size": {"w": {{atlas_width}}, "h": {{atlas_height}}},
+  "scale": "{{scale}}",
+  "frameTags": [],
+  "layers": [],
+  "slices": []
+ }
+}
+[/if_no_animations]

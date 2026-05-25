@@ -1,0 +1,31 @@
+[meta]
+name=Phaser JSON Array
+description=Phaser 3 atlas format (JSON Array, compatible with TexturePacker JSON Array output)
+extension=.json
+[/meta]
+
+[header]
+{
+  "frames": [
+
+[/header]
+
+[sprite]
+    {"filename": "{{name}}", "frame": {"x": {{x}}, "y": {{y}}, "w": {{w}}, "h": {{h}}}, "rotated": {{rotated}}, "trimmed": {{has_trim}}, "spriteSourceSize": {"x": {{trim_left}}, "y": {{trim_top}}, "w": {{w}}, "h": {{h}}}, "sourceSize": {"w": {{source_w}}, "h": {{source_h}}}, "pivot": {"x": {{pivot_x_norm}}, "y": {{pivot_y_norm_raw}}}}
+[/sprite]
+
+[separator]
+,
+[/separator]
+
+[footer]
+
+  ],
+  "meta": {
+    "image": "{{atlas_path}}",
+    "format": "RGBA8888",
+    "size": {"w": {{atlas_width}}, "h": {{atlas_height}}},
+    "scale": "{{scale}}"
+  }
+}
+[/footer]

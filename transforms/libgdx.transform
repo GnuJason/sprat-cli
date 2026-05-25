@@ -1,0 +1,25 @@
+[meta]
+name=LibGDX
+description=LibGDX TextureAtlas format (.atlas)
+extension=.atlas
+[/meta]
+
+[header]
+{{output_pattern}}
+size: {{atlas_width}},{{atlas_height}}
+format: RGBA8888
+filter: Nearest,Nearest
+repeat: none
+
+[/header]
+
+[sprite]
+{{name}}
+  rotate: {{rotated}}
+  xy: {{x}}, {{y}}
+  size: {{w}}, {{h}}
+  orig: {{source_w}}, {{source_h}}
+  offset: {{trim_left}}, {{trim_bottom}}
+  index: -1
+
+[/sprite]

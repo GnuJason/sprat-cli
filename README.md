@@ -519,6 +519,8 @@ Built-in transform files:
 - `csv.transform`
 - `xml.transform`
 - `css.transform`
+- `unity.json.transform`
+- `unity.meta.transform`
 
 The built-in JSON transform (`--transform json`) produces a top-level `atlases` array (each entry has `width`, `height`, `path`) and a flat top-level `sprites` array. Sprite spatial data is grouped into nested objects: `rect` (`x`, `y`, `w`, `h`), `pivot` (`x`, `y`), and `trim` (`left`, `top`, `right`, `bottom`). Use `atlas_index` in each sprite entry to associate it with an atlas when multipacking.
 
@@ -539,7 +541,11 @@ Common placeholders:
 
 - `{{atlas_width}}`, `{{atlas_height}}`, `{{scale}}`, `{{sprite_count}}`
 - `{{index}}`, `{{name}}`, `{{path}}`, `{{x}}`, `{{y}}`, `{{w}}`, `{{h}}`
-- `{{pivot_x}}`, `{{pivot_y}}` (resolved from "pivot" markers)
+- `{{unity_y}}` (Y-coordinate flipped for Unity: `atlas_height - y - h`)
+- `{{pivot_x}}`, `{{pivot_y}}` (resolved from "pivot" markers; in pixels relative to original sprite)
+- `{{pivot_x_norm}}`, `{{pivot_y_norm}}` (normalized 0.0 to 1.0; `pivot_y_norm` is flipped for Unity: `1.0 - (py/sh)`)
+- `{{pivot_y_norm_raw}}` (normalized Y without flipping)
+- `{{name_hash}}`, `{{name_hash_hex}}` (FNV-1a hash of the sprite name; useful for stable IDs)
 - `{{src_x}}`, `{{src_y}}`, `{{trim_left}}`, `{{trim_top}}`, `{{trim_right}}`, `{{trim_bottom}}`
 - `{{rotation}}` (numeric degrees; `0` when unrotated, `90` when rotated clockwise; built-in transforms use this field)
 - `[rotated]...[/rotated]` sections inside sprite templates emit their contents only for rotated sprites; non-rotated sprites have the block removed automatically.

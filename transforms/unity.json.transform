@@ -1,0 +1,40 @@
+[meta]
+name=Unity JSON
+description=Unity-compatible JSON sprite sheet (TexturePacker JSON Hash format with normalized pivots)
+extension=.json
+[/meta]
+
+[header]
+{
+  "frames": {
+
+[/header]
+
+[sprite]
+    "{{name}}": {
+      "frame": {"x": {{x}}, "y": {{y}}, "w": {{w}}, "h": {{h}}},
+      "rotated": {{rotated}},
+      "trimmed": {{has_trim}},
+      "spriteSourceSize": {"x": {{trim_left}}, "y": {{trim_top}}, "w": {{w}}, "h": {{h}}},
+      "sourceSize": {"w": {{source_w}}, "h": {{source_h}}},
+      "pivot": {"x": {{pivot_x_norm}}, "y": {{pivot_y_norm_raw}}}
+    }
+[/sprite]
+
+[separator]
+,
+[/separator]
+
+[footer]
+
+  },
+  "meta": {
+    "app": "https://github.com/pedroac/sprat-cli",
+    "version": "1.0",
+    "image": "{{atlas_path}}",
+    "format": "RGBA8888",
+    "size": {"w": {{atlas_width}}, "h": {{atlas_height}}},
+    "scale": "{{scale}}"
+  }
+}
+[/footer]

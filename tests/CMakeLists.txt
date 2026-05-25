@@ -74,6 +74,12 @@ add_test(
             $<TARGET_FILE:spratframes>
 )
 
+add_test(
+    NAME unity
+    COMMAND ${BASH_EXE} ${CMAKE_CURRENT_SOURCE_DIR}/unity_test.sh
+            $<TARGET_FILE:spratconvert>
+)
+
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/sort_behavior_test.sh")
     add_test(
         NAME sort_behavior

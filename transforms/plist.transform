@@ -1,0 +1,49 @@
+[meta]
+name=plist
+description=Cocos2d-x TextureAtlas plist format (format 2)
+extension=.plist
+[/meta]
+
+[header]
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>frames</key>
+	<dict>
+
+[/header]
+
+[sprite]
+		<key>{{name}}</key>
+		<dict>
+			<key>frame</key>
+			<string>{{plist_frame}}</string>
+			<key>offset</key>
+			<string>{{plist_offset}}</string>
+			<key>rotated</key>
+			{{rotated_plist}}
+			<key>sourceColorRect</key>
+			<string>{{plist_source_color_rect}}</string>
+			<key>sourceSize</key>
+			<string>{{plist_source_size}}</string>
+		</dict>
+
+[/sprite]
+
+[footer]
+	</dict>
+	<key>metadata</key>
+	<dict>
+		<key>format</key>
+		<integer>2</integer>
+		<key>realTextureFileName</key>
+		<string>{{output_pattern}}</string>
+		<key>size</key>
+		<string>{{plist_atlas_size}}</string>
+		<key>textureFileName</key>
+		<string>{{output_pattern}}</string>
+	</dict>
+</dict>
+</plist>
+[/footer]
