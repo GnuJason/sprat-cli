@@ -6,7 +6,7 @@ sprat-cli \- sprite atlas layout and packing pipeline
 .I folder|file|-
 [\fB\-\-profile\fR \fINAME\fR]
 [\fB\-\-profiles\-config\fR \fIPATH\fR]
-[\fB\-\-mode\fR compact|pot|fast]
+[\fB\-\-mode\fR compact|pot|fast|grid]
 [\fB\-\-optimize\fR gpu|space]
 [\fB\-\-max\-width\fR \fIN\fR]
 [\fB\-\-max\-height\fR \fIN\fR]
@@ -222,8 +222,9 @@ Profile name loaded from profile config. Default: \fBfast\fR.
 \fB\-\-profiles\-config\fR \fIPATH\fR
 Use an explicit profile configuration file.
 .TP
-\fB\-\-mode\fR compact|pot|fast
+\fB\-\-mode\fR compact|pot|fast|grid
 Override packing mode from selected profile.
+\fBgrid\fR places every sprite in a uniform cell (sized to the largest frame) arranged left-to-right, top-to-bottom, so any frame can be addressed by column and row index.
 .TP
 \fB\-\-optimize\fR gpu|space
 Override optimization target from selected profile.
@@ -281,7 +282,7 @@ Enable detailed error reporting and debug visualization.
 .PP
 Config keys available per profile section:
 .IP "\(bu" 2
-\fBmode=compact|pot|fast\fR
+\fBmode=compact|pot|fast|grid\fR
 .IP "\(bu" 2
 \fBoptimize=gpu|space\fR
 .IP "\(bu" 2

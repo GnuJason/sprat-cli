@@ -108,7 +108,7 @@ bool parse_quoted_path_argument(std::string_view input, size_t& pos, std::string
     return sprat::core::parse_quoted(input, pos, out, error);
 }
 
-enum class Mode : std::uint8_t { POT, COMPACT, FAST };
+enum class Mode : std::uint8_t { POT, COMPACT, FAST, GRID };
 enum class OptimizeTarget : std::uint8_t { GPU, SPACE };
 enum class ResolutionReference : std::uint8_t { Largest, Smallest };
 
@@ -227,6 +227,10 @@ bool parse_mode_from_string(const std::string& value, Mode& out, std::string& er
     }
     if (lower == "fast") {
         out = Mode::FAST;
+        return true;
+    }
+    if (lower == "grid") {
+        out = Mode::GRID;
         return true;
     }
     error = "invalid mode '" + value + "'";
@@ -2825,6 +2829,89 @@ bool pack_fast_shelf(
     return out_width > 0 && out_height > 0;
 }
 
+// Pack sprites into a uniform grid where every cell is max_sprite_width x max_sprite_height.
+// Sprites are placed left-to-right, top-to-bottom.  The number of columns is chosen to make
+// the atlas as square as possible, subject to width_limit / height_limit (0 = no limit).
+bool pack_grid(
+    std::vector<Sprite>& sprites,
+    int padding,
+    int width_limit,
+    int height_limit,
+    int& out_width,
+    int& out_height
+) {
+    if (sprites.empty()) {
+        return false;
+    }
+
+    int cell_w = 0;
+    int cell_h = 0;
+    for (const auto& s : sprites) {
+        int padded_w = 0;
+        int padded_h = 0;
+        if (!checked_add_int(s.w, padding, padded_w) || !checked_add_int(s.h, padding, padded_h)) {
+            return false;
+        }
+        cell_w = std::max(cell_w, padded_w);
+        cell_h = std::max(cell_h, padded_h);
+    }
+    if (cell_w <= 0 || cell_h <= 0) {
+        return false;
+    }
+    if ((width_limit > 0 && cell_w > width_limit) || (height_limit > 0 && cell_h > height_limit)) {
+        return false;
+    }
+
+    int n = static_cast<int>(sprites.size());
+    int max_cols = (width_limit > 0) ? (width_limit / cell_w) : n;
+    if (max_cols <= 0) {
+        return false;
+    }
+
+    int cols = static_cast<int>(std::ceil(std::sqrt(static_cast<double>(n))));
+    if (cols <= 0) {
+        cols = 1;
+    }
+    cols = std::min(cols, max_cols);
+
+    // Widen if height limit is exceeded
+    if (height_limit > 0) {
+        while (cols < max_cols) {
+            int rows_needed = (n + cols - 1) / cols;
+            if (static_cast<long long>(rows_needed) * cell_h <= static_cast<long long>(height_limit)) {
+                break;
+            }
+            ++cols;
+        }
+        int rows_needed = (n + cols - 1) / cols;
+        if (static_cast<long long>(rows_needed) * cell_h > static_cast<long long>(height_limit)) {
+            return false;
+        }
+    }
+
+    for (int i = 0; i < n; ++i) {
+        int col = i % cols;
+        int row = i / cols;
+        long long x_ll = static_cast<long long>(col) * cell_w;
+        long long y_ll = static_cast<long long>(row) * cell_h;
+        if (x_ll > std::numeric_limits<int>::max() || y_ll > std::numeric_limits<int>::max()) {
+            return false;
+        }
+        sprites[i].x = static_cast<int>(x_ll);
+        sprites[i].y = static_cast<int>(y_ll);
+    }
+
+    int rows = (n + cols - 1) / cols;
+    long long total_w_ll = static_cast<long long>(cols) * cell_w;
+    long long total_h_ll = static_cast<long long>(rows) * cell_h;
+    if (total_w_ll > std::numeric_limits<int>::max() || total_h_ll > std::numeric_limits<int>::max()) {
+        return false;
+    }
+    out_width = static_cast<int>(total_w_ll);
+    out_height = static_cast<int>(total_h_ll);
+    return true;
+}
+
 bool compute_tight_atlas_bounds(const std::vector<Sprite>& sprites, int& out_width, int& out_height) {
     out_width = 0;
     out_height = 0;
@@ -2916,6 +3003,55 @@ bool pack_atlases(
     std::vector<Atlas>& out_atlases
 ) {
     if (sprites.empty()) {
+        return true;
+    }
+
+    // Grid mode: uniform-cell layout, split into equal-capacity atlases when needed.
+    if (mode == Mode::GRID) {
+        int cell_w = 0;
+        int cell_h = 0;
+        for (const auto& s : sprites) {
+            int pw = 0;
+            int ph = 0;
+            if (!checked_add_int(s.w, padding, pw) || !checked_add_int(s.h, padding, ph)) {
+                return false;
+            }
+            cell_w = std::max(cell_w, pw);
+            cell_h = std::max(cell_h, ph);
+        }
+        if (cell_w <= 0 || cell_h <= 0 || cell_w > max_w || cell_h > max_h) {
+            return false;
+        }
+        int cols = max_w / cell_w;
+        int rows_per_atlas = max_h / cell_h;
+        if (cols <= 0 || rows_per_atlas <= 0) {
+            return false;
+        }
+        int capacity = cols * rows_per_atlas;
+        int n = static_cast<int>(sprites.size());
+        int atlas_idx = 0;
+        for (int base = 0; base < n; base += capacity, ++atlas_idx) {
+            int count = std::min(capacity, n - base);
+            int atlas_rows = (count + cols - 1) / cols;
+            long long aw = static_cast<long long>(cols) * cell_w;
+            long long ah = static_cast<long long>(atlas_rows) * cell_h;
+            if (aw > std::numeric_limits<int>::max() || ah > std::numeric_limits<int>::max()) {
+                return false;
+            }
+            out_atlases.push_back({static_cast<int>(aw), static_cast<int>(ah)});
+            for (int i = 0; i < count; ++i) {
+                int col = i % cols;
+                int row = i / cols;
+                long long x_ll = static_cast<long long>(col) * cell_w;
+                long long y_ll = static_cast<long long>(row) * cell_h;
+                if (x_ll > std::numeric_limits<int>::max() || y_ll > std::numeric_limits<int>::max()) {
+                    return false;
+                }
+                sprites[base + i].x = static_cast<int>(x_ll);
+                sprites[base + i].y = static_cast<int>(y_ll);
+                sprites[base + i].atlas_index = atlas_idx;
+            }
+        }
         return true;
     }
 
@@ -3564,7 +3700,7 @@ int run_spratlayout(int argc, char** argv) {
         if (profile_debug) {
             std::cerr << "[profile-debug] applied_profile=" << selected_profile.name << "\n";
             std::cerr << "[profile-debug] mode="
-                      << (mode == Mode::FAST ? "fast" : (mode == Mode::COMPACT ? "compact" : "pot"))
+                      << (mode == Mode::FAST ? "fast" : (mode == Mode::COMPACT ? "compact" : (mode == Mode::GRID ? "grid" : "pot")))
                       << " optimize="
                       << (optimize_target == OptimizeTarget::GPU ? "gpu" : "space")
                       << " padding=" << padding
@@ -4973,6 +5109,24 @@ int run_spratlayout(int argc, char** argv) {
             }
             atlases.push_back({atlas_width, atlas_height});
             for (auto& s : sprites) { s.atlas_index = 0; }
+        } else if (mode == Mode::GRID) {
+            std::vector<Sprite> sorted_sprites = sprites;
+            if (enforce_name_order) {
+                sort_sprites_by_mode(sorted_sprites, SortMode::None);
+            } else if (enforce_stable_order) {
+                sort_sprites_stable(sorted_sprites, stable_metric);
+            }
+            int grid_width = 0;
+            int grid_height = 0;
+            if (!pack_grid(sorted_sprites, padding, width_upper_bound, height_upper_bound, grid_width, grid_height)) {
+                std::cerr << tr("Error: failed to compute grid layout\n");
+                return 1;
+            }
+            sprites = std::move(sorted_sprites);
+            atlas_width = grid_width;
+            atlas_height = grid_height;
+            atlases.push_back({atlas_width, atlas_height});
+            for (auto& s : sprites) { s.atlas_index = 0; }
         } else {
             int target_width = max_width;
             if (total_area > 0) {
@@ -5033,7 +5187,7 @@ int run_spratlayout(int argc, char** argv) {
         }
     }
 
-    if (padding > 0) {
+    if (padding > 0 && mode != Mode::GRID) {
         if (multipack) {
             for (size_t ai = 0; ai < atlases.size(); ++ai) {
                 int tight_w = 0;
