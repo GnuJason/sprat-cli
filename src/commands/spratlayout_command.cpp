@@ -2844,16 +2844,21 @@ bool pack_grid(
         return false;
     }
 
-    int cell_w = 0;
-    int cell_h = 0;
+    const int ref_w = sprites[0].w;
+    const int ref_h = sprites[0].h;
     for (const auto& s : sprites) {
-        int padded_w = 0;
-        int padded_h = 0;
-        if (!checked_add_int(s.w, padding, padded_w) || !checked_add_int(s.h, padding, padded_h)) {
+        if (s.w != ref_w || s.h != ref_h) {
+            std::cerr << tr("Error: grid mode requires all sprites to be the same size; ")
+                      << s.path << " is " << s.w << "x" << s.h
+                      << tr(", expected ") << ref_w << "x" << ref_h << '\n';
             return false;
         }
-        cell_w = std::max(cell_w, padded_w);
-        cell_h = std::max(cell_h, padded_h);
+    }
+
+    int cell_w = 0;
+    int cell_h = 0;
+    if (!checked_add_int(ref_w, padding, cell_w) || !checked_add_int(ref_h, padding, cell_h)) {
+        return false;
     }
     if (cell_w <= 0 || cell_h <= 0) {
         return false;
@@ -3008,16 +3013,20 @@ bool pack_atlases(
 
     // Grid mode: uniform-cell layout, split into equal-capacity atlases when needed.
     if (mode == Mode::GRID) {
-        int cell_w = 0;
-        int cell_h = 0;
+        const int ref_w = sprites[0].w;
+        const int ref_h = sprites[0].h;
         for (const auto& s : sprites) {
-            int pw = 0;
-            int ph = 0;
-            if (!checked_add_int(s.w, padding, pw) || !checked_add_int(s.h, padding, ph)) {
+            if (s.w != ref_w || s.h != ref_h) {
+                std::cerr << tr("Error: grid mode requires all sprites to be the same size; ")
+                          << s.path << " is " << s.w << "x" << s.h
+                          << tr(", expected ") << ref_w << "x" << ref_h << '\n';
                 return false;
             }
-            cell_w = std::max(cell_w, pw);
-            cell_h = std::max(cell_h, ph);
+        }
+        int cell_w = 0;
+        int cell_h = 0;
+        if (!checked_add_int(ref_w, padding, cell_w) || !checked_add_int(ref_h, padding, cell_h)) {
+            return false;
         }
         if (cell_w <= 0 || cell_h <= 0 || cell_w > max_w || cell_h > max_h) {
             return false;

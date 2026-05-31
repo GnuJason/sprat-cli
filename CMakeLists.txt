@@ -257,7 +257,74 @@ set(BUILD_STATIC_LIBS ON CACHE BOOL "" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 # Jsonnet's CMakeLists.txt uses cmake_minimum_required < 3.5; suppress the error
 set(CMAKE_POLICY_VERSION_MINIMUM "3.5" CACHE INTERNAL "")
-FetchContent_MakeAvailable(jsonnet)
+FetchContent_GetProperties(jsonnet)
+if(NOT jsonnet_POPULATED)
+    # Silence FetchContent_Populate() deprecation warning on CMake >= 3.30.
+    if(POLICY CMP0169)
+        cmake_policy(SET CMP0169 OLD)
+    endif()
+    FetchContent_Populate(jsonnet)
+    if(MSVC)
+        # jsonnet v0.20.0 rejects non-GCC/Clang compilers with a FATAL_ERROR in
+        # the else() branch of its compiler-flags check (CMakeLists.txt:43).
+        # Downgrade it to STATUS so MSVC can configure and build with defaults.
+        file(READ "${jsonnet_SOURCE_DIR}/CMakeLists.txt" _jcml)
+        string(REGEX REPLACE
+            "message[(]FATAL_ERROR \"Compiler [^\"]+not supported\"[)]"
+            "message(STATUS \"MSVC detected; using default compiler flags\")"
+            _jcml "${_jcml}")
+        # jsonnet hardcodes CMAKE_CXX_STANDARD 11 unconditionally, which maps to
+        # no /std:c++ flag on MSVC (MSVC has no /std:c++11). Its headers use
+        # nested namespaces (C++17), so raise the standard to 17.
+        string(REPLACE
+            "set(CMAKE_CXX_STANDARD 11)"
+            "set(CMAKE_CXX_STANDARD 17)"
+            _jcml "${_jcml}")
+        file(WRITE "${jsonnet_SOURCE_DIR}/CMakeLists.txt" "${_jcml}")
+
+        # jsonnet's stdlib/CMakeLists.txt invokes to_c_array via
+        # ${GLOBAL_OUTPUT_PATH}/to_c_array, which is wrong for MSVC multi-config
+        # generators: those place the executable in a per-config subdirectory
+        # (e.g. Release/) that the plain path doesn't include.
+        # Replace it with $<TARGET_FILE:to_c_array>, a generator expression that
+        # resolves to the correct full path (config subdir + .exe) at build time.
+        file(READ "${jsonnet_SOURCE_DIR}/stdlib/CMakeLists.txt" _jstdlib)
+        string(REGEX REPLACE
+            "\\$\\{GLOBAL_OUTPUT_PATH\\}/to_c_array"
+            "$<TARGET_FILE:to_c_array>"
+            _jstdlib "${_jstdlib}")
+        file(WRITE "${jsonnet_SOURCE_DIR}/stdlib/CMakeLists.txt" "${_jstdlib}")
+    endif()
+    add_subdirectory("${jsonnet_SOURCE_DIR}" "${jsonnet_BINARY_DIR}")
+endif()
+
+# jsonnet v0.20.0 builds libjsonnet++ (shared) without declaring its dependency
+# on libjsonnet, causing undefined-symbol errors on macOS where dylibs must have
+# all symbols resolved at link time. Patch the target here when it is shared.
+if(TARGET libjsonnet++ AND TARGET libjsonnet)
+    get_target_property(_ljnpp_type libjsonnet++ TYPE)
+    if(_ljnpp_type STREQUAL "SHARED_LIBRARY")
+        target_link_libraries(libjsonnet++ PRIVATE libjsonnet)
+    endif()
+endif()
+
+# Suppress common MSVC warnings in jsonnet targets (written for GCC/Clang).
+if(MSVC)
+    foreach(_jt libjsonnet_static libjsonnet++_static)
+        if(TARGET ${_jt})
+            target_compile_options(${_jt} PRIVATE
+                /wd4100   # unreferenced formal parameter
+                /wd4127   # conditional expression is constant
+                /wd4244   # conversion, possible loss of data
+                /wd4267   # conversion from size_t
+                /wd4702   # unreachable code
+                /wd4706   # assignment within conditional expression
+                /wd4996   # deprecated CRT function
+            )
+            target_compile_definitions(${_jt} PRIVATE _CRT_SECURE_NO_WARNINGS)
+        endif()
+    endforeach()
+endif()
 
 # Target definitions
 add_library(spratcore STATIC
@@ -277,7 +344,7 @@ target_include_directories(spratcore PUBLIC src)
 target_include_directories(spratcore SYSTEM PRIVATE ${STB_DIR})
 target_include_directories(spratcore PRIVATE ${LIBARCHIVE_INCLUDE_DIRS})
 target_link_libraries(spratcore PRIVATE ${LIBARCHIVE_LIBRARIES})
-target_link_libraries(spratcore PRIVATE libjsonnet++ libjsonnet_static)
+target_link_libraries(spratcore PRIVATE libjsonnet++_static libjsonnet_static)
 if(SPRAT_GETTEXT_AVAILABLE)
     target_compile_definitions(spratcore PUBLIC SPRAT_ENABLE_GETTEXT)
     target_link_libraries(spratcore PUBLIC ${SPRAT_INTL_LIBRARIES})
