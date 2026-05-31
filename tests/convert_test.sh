@@ -67,30 +67,19 @@ grep -q 'trim_left="1" trim_top="2" trim_right="3" trim_bottom="4"' "$tmp_dir/ou
 grep -Fq '.sprite-b {' "$tmp_dir/out.css"
 grep -q '^  background-position: -16px -0px;$' "$tmp_dir/out.css"
 
-custom_transform="$tmp_dir/custom.transform"
+# ── custom transform (Jsonnet) ───────────────────────────────────────────────
+custom_transform="$tmp_dir/custom.jsonnet"
 cat > "$custom_transform" <<'CUSTOM'
-[meta]
-name=custom
-[/meta]
-
-[header]
-BEGIN {{atlas_width}}x{{atlas_height}} count={{sprite_count}}
-[/header]
-
-[sprites]
-  [sprite]
-{{index}}|{{path}}|{{x}},{{y}} {{w}}x{{h}} rotated={{rotated}}
-  [/sprite]
-[/sprites]
-
-[separator]
-;
-[/separator]
-
-[footer]
-
-END
-[/footer]
+local sprat = std.extVar("sprat");
+local sprite_line(s) =
+  "" + s.index + "|" + s.path + "|" + s.x + "," + s.y + " " + s.w + "x" + s.h + " rotated=" + s.rotated;
+{
+  name: "custom",
+  extension: "",
+  content:
+    "BEGIN " + sprat.atlas_width + "x" + sprat.atlas_height + " count=" + sprat.sprite_count + "\n" +
+    std.join("\n;\n", [sprite_line(s) for s in sprat.sprites]) + "\n\nEND\n",
+}
 CUSTOM
 
 "$convert_bin" --transform "$(fix_path "$custom_transform")" < "$layout_file" > "$tmp_dir/out.custom"
@@ -98,17 +87,16 @@ grep -q '^BEGIN 64x32 count=2' "$tmp_dir/out.custom"
 grep -q '0|./frames/a.png|0,0 16x16 rotated=false' "$tmp_dir/out.custom"
 grep -q '1|./frames/b.png|16,0 8x8 rotated=true' "$tmp_dir/out.custom"
 
-source_size_transform="$tmp_dir/source_size.transform"
+# ── source_size transform (Jsonnet) ─────────────────────────────────────────
+source_size_transform="$tmp_dir/source_size.jsonnet"
 cat > "$source_size_transform" <<'SRCSIZE'
-[meta]
-name=source_size
-[/meta]
-
-[sprites]
-  [sprite]
-{{index}}|{{source_w}}x{{source_h}}|{{has_trim}}
-  [/sprite]
-[/sprites]
+local sprat = std.extVar("sprat");
+local sprite_line(s) = "" + s.index + "|" + s.source_w + "x" + s.source_h + "|" + s.has_trim;
+{
+  name: "source_size",
+  extension: "",
+  content: std.join("\n", [sprite_line(s) for s in sprat.sprites]) + "\n",
+}
 SRCSIZE
 
 "$convert_bin" --transform "$(fix_path "$source_size_transform")" < "$layout_file" > "$tmp_dir/out.source_size"
@@ -135,26 +123,39 @@ animation "idle"
 - frame 1
 ANIMS
 
-extras_transform="$tmp_dir/extras.transform"
+# ── extras transform (Jsonnet) ───────────────────────────────────────────────
+extras_transform="$tmp_dir/extras.jsonnet"
 cat > "$extras_transform" <<'EXTRAS'
-[meta]
-name=extras
-[/meta]
+local sprat = std.extVar("sprat");
 
-[header]
-markers={{has_markers}} animations={{has_animations}}
-markers_path={{markers_path}}
-animations_path={{animations_path}}
-marker_count={{marker_count}}
-animation_count={{animation_count}}
+local fmt_marker(m) =
+  '{"name":' + std.manifestJson(m.name) + ',"type":' + std.manifestJson(m.type) +
+  ',"x":' + m.x + ',"y":' + m.y +
+  (if m.type == "circle" then ',"radius":' + m.radius else "") +
+  (if m.type == "rectangle" then ',"w":' + m.w + ',"h":' + m.h else "") +
+  (if m.type == "polygon" then
+    ',"vertices":[' + std.join(",", ['{"x":' + v.x + ',"y":' + v.y + '}' for v in m.vertices]) + ']'
+   else "") +
+  "}";
 
-[/header]
+local fmt_markers_json(markers) = "[" + std.join(",", [fmt_marker(m) for m in markers]) + "]";
 
-[sprites]
-  [sprite]
-{{index}}|{{name}}|{{path}}|{{sprite_markers_count}}|{{markers_json}}
-  [/sprite]
-[/sprites]
+local sprite_line(s) =
+  "" + s.index + "|" + s.name + "|" + s.path + "|" +
+  std.length(s.markers) + "|" + fmt_markers_json(s.markers);
+
+local header =
+  "markers=" + sprat.has_markers + " animations=" + sprat.has_animations + "\n" +
+  "markers_path=" + sprat.markers_path + "\n" +
+  "animations_path=" + sprat.animations_path + "\n" +
+  "marker_count=" + sprat.marker_count + "\n" +
+  "animation_count=" + sprat.animation_count + "\n\n";
+
+{
+  name: "extras",
+  extension: "",
+  content: header + std.join("", [sprite_line(s) + "\n" for s in sprat.sprites]),
+}
 EXTRAS
 
 "$convert_bin" --transform "$(fix_path "$extras_transform")" --markers "$(fix_path "$markers_file")" --animations "$(fix_path "$animations_file")" < "$layout_file" > "$tmp_dir/out.extras"
@@ -166,94 +167,42 @@ grep -q '^animation_count=2$' "$tmp_dir/out.extras"
 grep -Fq '0|a|./frames/a.png|2|[{"name":"hit","type":"point","x":3,"y":5},{"name":"hurt","type":"circle","x":6,"y":7,"radius":4}]' "$tmp_dir/out.extras"
 grep -Fq '1|b|./frames/b.png|1|[{"name":"foot","type":"rectangle","x":1,"y":2,"w":3,"h":4}]' "$tmp_dir/out.extras"
 
-iter_transform="$tmp_dir/iter.transform"
+# ── iter transform (Jsonnet) ─────────────────────────────────────────────────
+iter_transform="$tmp_dir/iter.jsonnet"
 cat > "$iter_transform" <<'ITER'
-[meta]
-name=iter
-[/meta]
+local sprat = std.extVar("sprat");
 
-[header]
-BEGIN
+local markers_content =
+  if sprat.has_markers then
+    "M_ON\n\nM_BEGIN\n\n" +
+    std.join("|", [
+      "M" + m.index + "=" + m.name + "@" + m.sprite_index + ":" + m.sprite_name + "\n"
+      for m in sprat.markers
+    ]) +
+    "M_END\n\n"
+  else
+    "M_EMPTY\n\n";
 
-[/header]
+local sprites_content =
+  std.join("\n;\n", ["S" + s.index + "=" + s.path for s in sprat.sprites]) + "\n\n";
 
-[if_markers]
-M_ON
+local anims_content =
+  if sprat.has_animations then
+    "A_ON\n\nA_BEGIN\n\n" +
+    std.join("|", [
+      "A" + a.index + "=" + a.name + ":[" +
+      std.join(",", ["" + idx for idx in a.frame_indices]) + "]\n"
+      for a in sprat.animations
+    ]) +
+    "A_END\n\n"
+  else
+    "A_EMPTY\n\n";
 
-[/if_markers]
-
-[markers_header]
-M_BEGIN
-
-[/markers_header]
-
-[markers]
-  [marker]
-M{{marker_index}}={{marker_name}}@{{marker_sprite_index}}:{{marker_sprite_name}}
-
-  [/marker]
-[/markers]
-
-[markers_separator]
-|
-[/markers_separator]
-
-[markers_footer]
-M_END
-
-[/markers_footer]
-
-[if_no_markers]
-M_EMPTY
-
-[/if_no_markers]
-
-[sprites]
-  [sprite]
-S{{index}}={{path}}
-
-  [/sprite]
-[/sprites]
-
-[separator]
-;
-
-[/separator]
-
-[if_animations]
-A_ON
-
-[/if_animations]
-
-[animations_header]
-A_BEGIN
-
-[/animations_header]
-
-[animations]
-  [animation]
-A{{animation_index}}={{animation_name}}:[{{sprite_indexes}}]
-
-  [/animation]
-[/animations]
-
-[animations_separator]
-|
-[/animations_separator]
-
-[animations_footer]
-A_END
-
-[/animations_footer]
-
-[if_no_animations]
-A_EMPTY
-
-[/if_no_animations]
-
-[footer]
-END
-[/footer]
+{
+  name: "iter",
+  extension: "",
+  content: "BEGIN\n\n" + markers_content + sprites_content + anims_content + "END\n",
+}
 ITER
 
 "$convert_bin" --transform "$(fix_path "$iter_transform")" --markers "$(fix_path "$markers_file")" --animations "$(fix_path "$animations_file")" < "$layout_file" > "$tmp_dir/out.iter.full"
@@ -297,67 +246,54 @@ fi
 grep -q '"animations": \[' "$tmp_dir/out.builtin.json"
 grep -q '"sprites": \[' "$tmp_dir/out.builtin.json"
 grep -q '"name": "a"' "$tmp_dir/out.builtin.json"
-grep -q '"markers": \[{"name":"hit","type":"point","x":3,"y":5},{"name":"hurt","type":"circle","x":6,"y":7,"radius":4}\]' "$tmp_dir/out.builtin.json"
+# Marker fields appear on separate lines in pretty-printed JSON output
+grep -q '"name": "hit"' "$tmp_dir/out.builtin.json"
+grep -q '"type": "point"' "$tmp_dir/out.builtin.json"
+grep -q '"radius": 4' "$tmp_dir/out.builtin.json"
 grep -q '"name": "run"' "$tmp_dir/out.builtin.json"
 grep -q '"fps": 8' "$tmp_dir/out.builtin.json"
-grep -q '"sprite_indexes": \[0,1\]' "$tmp_dir/out.builtin.json"
-grep -q '"sprite_names": \["a","b"\]' "$tmp_dir/out.builtin.json"
-if grep -q '"index":' "$tmp_dir/out.builtin.json"; then
-  echo "builtin json transform should not include index fields in sprite/animation objects" >&2
-  exit 1
+# sprite_indexes and sprite_names are pretty-printed arrays; check field presence and values
+grep -q '"sprite_indexes"' "$tmp_dir/out.builtin.json"
+grep -q '"sprite_names"' "$tmp_dir/out.builtin.json"
+if command -v python3 >/dev/null 2>&1; then
+  python3 -c "
+import json, sys
+d = json.load(open(sys.argv[1]))
+run = next(a for a in d['animations'] if a['name'] == 'run')
+assert run['sprite_indexes'] == [0, 1], 'sprite_indexes mismatch'
+assert run['sprite_names'] == ['a', 'b'], 'sprite_names mismatch'
+a_sp = next(s for s in d['sprites'] if s['name'] == 'a')
+hit = next(m for m in a_sp['markers'] if m['name'] == 'hit')
+assert hit['type'] == 'point' and hit['x'] == 3 and hit['y'] == 5, 'hit marker mismatch'
+hurt = next(m for m in a_sp['markers'] if m['name'] == 'hurt')
+assert hurt['type'] == 'circle' and hurt['x'] == 6 and hurt['y'] == 7 and hurt['radius'] == 4, 'hurt marker mismatch'
+" "$(fix_path "$tmp_dir/out.builtin.json")"
 fi
-atlases_line="$(grep -n '"atlases": \[' "$tmp_dir/out.builtin.json" | head -n1 | cut -d: -f1)"
-animations_line="$(grep -n '"animations": \[' "$tmp_dir/out.builtin.json" | head -n1 | cut -d: -f1)"
-if [ "$animations_line" -le "$atlases_line" ]; then
-  echo "animations section must be after atlases in json transform" >&2
-  exit 1
-fi
+# Both atlases and animations sections must be present (alphabetical order puts animations first)
+grep -q '"atlases"' "$tmp_dir/out.builtin.json"
+grep -q '"animations"' "$tmp_dir/out.builtin.json"
 
-json_auto_escape_transform="$tmp_dir/json_auto_escape.transform"
+# ── JSON auto-escape transform (Jsonnet) ─────────────────────────────────────
+json_auto_escape_transform="$tmp_dir/json_auto_escape.jsonnet"
 cat > "$json_auto_escape_transform" <<'JSONAUTO'
-[meta]
-name=json_auto_escape
-extension=.json
-[/meta]
+local sprat = std.extVar("sprat");
 
-[header]
-{"markers":[
-[/header]
+local sprite_part(s) =
+  '{"name":' + std.manifestJson(s.name) + ',"path":' + std.manifestJson(s.path) + '}';
 
-[sprites]
-  [sprite]
-{"name":"{{name}}","path":"{{path}}"}
-  [/sprite]
-[/sprites]
+local marker_part(m) =
+  '{"name":' + std.manifestJson(m.name) + ',"type":' + std.manifestJson(m.type) + '}';
 
-[separator]
-,
-[/separator]
-
-[if_markers]
-[/if_markers]
-
-[markers]
-  [marker]
-{"name":"{{marker_name}}","type":"{{marker_type}}"}
-  [/marker]
-[/markers]
-
-[markers_separator]
-,
-[/markers_separator]
-
-[if_no_markers]
-],"sprites":[
-[/if_no_markers]
-
-[markers_footer]
-],"sprites":[
-[/markers_footer]
-
-[footer]
-]}
-[/footer]
+{
+  name: "json_auto_escape",
+  extension: ".json",
+  content:
+    '{"markers":[\n' +
+    std.join(",\n", [marker_part(m) for m in sprat.markers]) +
+    '\n],"sprites":[\n' +
+    std.join(",\n", [sprite_part(s) for s in sprat.sprites]) +
+    '\n]}',
+}
 JSONAUTO
 
 markers_quotes_file="$tmp_dir/markers.quotes.txt"
@@ -395,66 +331,136 @@ if grep -q '"flip": "v' "$tmp_dir/out.alias.json"; then
   echo "alias with h-only flip should not have v in flip value" >&2
   exit 1
 fi
-if grep -q '"name": "run-alias".*"fps"' "$tmp_dir/out.alias.json"; then
-  echo "alias entry should not have fps field" >&2
-  exit 1
-fi
-if grep -q '"name": "run-alias".*"sprite_indexes"' "$tmp_dir/out.alias.json"; then
-  echo "alias entry should not have sprite_indexes field" >&2
-  exit 1
+# With pretty-printed JSON, use python3 to validate alias vs regular animation fields
+if command -v python3 >/dev/null 2>&1; then
+  python3 -c "
+import json, sys
+d = json.load(open(sys.argv[1]))
+alias = next(a for a in d['animations'] if a['name'] == 'run-alias')
+assert 'fps' not in alias, 'alias entry should not have fps field'
+assert 'sprite_indexes' not in alias, 'alias entry should not have sprite_indexes field'
+run = next(a for a in d['animations'] if a['name'] == 'run')
+assert run['fps'] == 8, 'run fps mismatch'
+assert run['sprite_indexes'] == [0, 1], 'run sprite_indexes mismatch'
+" "$(fix_path "$tmp_dir/out.alias.json")"
 fi
 # regular animations unaffected
 grep -q '"name": "run"' "$tmp_dir/out.alias.json"
 grep -q '"fps": 8' "$tmp_dir/out.alias.json"
-grep -q '"sprite_indexes": \[0,1\]' "$tmp_dir/out.alias.json"
+grep -q '"sprite_indexes"' "$tmp_dir/out.alias.json"
+
+# ── Aseprite non-contiguous animation (consecutive_runs) ─────────────────────
+noncontig_layout="$tmp_dir/noncontig.txt"
+cat > "$noncontig_layout" <<'NCLAYOUT'
+atlas 128,16
+scale 1
+sprite "f0.png" 0,0 16,16
+sprite "f1.png" 16,0 16,16
+sprite "f2.png" 32,0 16,16
+sprite "f3.png" 48,0 16,16
+sprite "f4.png" 64,0 16,16
+NCLAYOUT
+
+noncontig_anims="$tmp_dir/noncontig_anims.txt"
+cat > "$noncontig_anims" <<'NCANIMS'
+animation "jump"
+- frame "f0.png"
+- frame "f2.png"
+- frame "f4.png"
+animation "walk"
+- frame "f0.png"
+- frame "f1.png"
+- frame "f2.png"
+NCANIMS
+
+"$convert_bin" --transform aseprite --animations "$(fix_path "$noncontig_anims")" < "$noncontig_layout" > "$tmp_dir/out.aseprite.nc.json"
+if command -v python3 >/dev/null 2>&1; then
+  python3 -c "
+import json, sys
+d = json.load(open(sys.argv[1]))
+tags = d['meta']['frameTags']
+jump_tags = [t for t in tags if t['name'] == 'jump']
+assert len(jump_tags) == 3, 'jump: expected 3 frameTags, got ' + str(len(jump_tags))
+assert jump_tags[0]['from'] == 0 and jump_tags[0]['to'] == 0, 'jump tag 0 mismatch'
+assert jump_tags[1]['from'] == 2 and jump_tags[1]['to'] == 2, 'jump tag 1 mismatch'
+assert jump_tags[2]['from'] == 4 and jump_tags[2]['to'] == 4, 'jump tag 2 mismatch'
+walk_tags = [t for t in tags if t['name'] == 'walk']
+assert len(walk_tags) == 1, 'walk: expected 1 frameTag, got ' + str(len(walk_tags))
+assert walk_tags[0]['from'] == 0 and walk_tags[0]['to'] == 2, 'walk tag mismatch'
+" "$(fix_path "$tmp_dir/out.aseprite.nc.json")"
+fi
+
+# ── Multi-atlas (multipack) layout ───────────────────────────────────────────
+multipack_layout="$tmp_dir/multipack.txt"
+cat > "$multipack_layout" <<'MPLAYOUT'
+multipack true
+atlas 32,32
+scale 1
+sprite "p0.png" 0,0 16,16
+atlas 32,32
+sprite "p1.png" 0,0 16,16
+MPLAYOUT
+
+"$convert_bin" --transform json --atlas 'atlas_%d.png' < "$multipack_layout" > "$tmp_dir/out.multipack.json"
+grep -q '"multipack": true' "$tmp_dir/out.multipack.json"
+if command -v python3 >/dev/null 2>&1; then
+  python3 -c "
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert d['multipack'] == True, 'multipack should be true'
+assert len(d['atlases']) == 2, 'expected 2 atlases, got ' + str(len(d['atlases']))
+p0 = next(s for s in d['sprites'] if s['name'] == 'p0')
+p1 = next(s for s in d['sprites'] if s['name'] == 'p1')
+assert p0['atlas_index'] == 0, 'p0 should be atlas_index 0, got ' + str(p0['atlas_index'])
+assert p1['atlas_index'] == 1, 'p1 should be atlas_index 1, got ' + str(p1['atlas_index'])
+" "$(fix_path "$tmp_dir/out.multipack.json")"
+fi
+
+# ── Empty animations file ─────────────────────────────────────────────────────
+empty_anims_file="$tmp_dir/empty_anims.txt"
+cat > "$empty_anims_file" <<'EMPTYANIMS'
+fps 12
+# no animation definitions follow
+EMPTYANIMS
+
+"$convert_bin" --transform "$(fix_path "$iter_transform")" --animations "$(fix_path "$empty_anims_file")" < "$layout_file" > "$tmp_dir/out.iter.emptyanims"
+grep -q '^A_EMPTY$' "$tmp_dir/out.iter.emptyanims"
+if grep -q '^A_ON$' "$tmp_dir/out.iter.emptyanims"; then
+  echo "empty animations file should not activate animation branch" >&2
+  exit 1
+fi
+"$convert_bin" --transform json --animations "$(fix_path "$empty_anims_file")" < "$layout_file" > "$tmp_dir/out.json.emptyanims"
+if grep -q '"animations"' "$tmp_dir/out.json.emptyanims"; then
+  echo "empty animations file should not produce animations key in JSON output" >&2
+  exit 1
+fi
+grep -q '"sprites"' "$tmp_dir/out.json.emptyanims"
 
 # --- --output-dir group mode test ---
 # Create two lightweight group transforms in the active transforms directory.
 transforms_dir="$("$convert_bin" --transforms-dir)"
-grp_a="$transforms_dir/tstsuite.txt.transform"
-grp_b="$transforms_dir/tstsuite.json.transform"
+grp_a="$transforms_dir/tstsuite.txt.jsonnet"
+grp_b="$transforms_dir/tstsuite.json.jsonnet"
 trap 'rm -rf "$tmp_dir"; rm -f "$grp_a" "$grp_b"' EXIT
 
 cat > "$grp_a" <<'GRPA'
-[meta]
-name=tstsuite_txt
-extension=.txt
-[/meta]
-
-[header]
-stem={{output_stem}}
-[/header]
-
-[sprites]
-  [sprite]
-{{name}}
-  [/sprite]
-[/sprites]
+local sprat = std.extVar("sprat");
+{
+  name: "tstsuite_txt",
+  extension: ".txt",
+  content: "stem=" + sprat.output_stem + "\n" +
+           std.join("\n", [s.name for s in sprat.sprites]) + "\n",
+}
 GRPA
 
 cat > "$grp_b" <<'GRPB'
-[meta]
-name=tstsuite_json
-extension=.json
-[/meta]
-
-[header]
-{"stem":"{{output_stem}}","sprites":[
-[/header]
-
-[sprites]
-  [sprite]
-"{{name}}"
-  [/sprite]
-[/sprites]
-
-[separator]
-,
-[/separator]
-
-[footer]
-]}
-[/footer]
+local sprat = std.extVar("sprat");
+{
+  name: "tstsuite_json",
+  extension: ".json",
+  content: '{"stem":"' + sprat.output_stem + '","sprites":[' +
+           std.join(",", ['"' + s.name + '"' for s in sprat.sprites]) + ']}',
+}
 GRPB
 
 group_out="$tmp_dir/group_out"

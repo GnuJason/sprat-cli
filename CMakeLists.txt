@@ -245,6 +245,20 @@ if(NOT SQUISH_FOUND)
     endif()
 endif()
 
+# Jsonnet dependency
+include(FetchContent)
+FetchContent_Declare(
+    jsonnet
+    GIT_REPOSITORY https://github.com/google/jsonnet.git
+    GIT_TAG f45e01d632b29e4c0757ec7ba188ce759298e6d3  # v0.20.0
+)
+set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(BUILD_STATIC_LIBS ON CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+# Jsonnet's CMakeLists.txt uses cmake_minimum_required < 3.5; suppress the error
+set(CMAKE_POLICY_VERSION_MINIMUM "3.5" CACHE INTERNAL "")
+FetchContent_MakeAvailable(jsonnet)
+
 # Target definitions
 add_library(spratcore STATIC
     src/core/cli_parse.cpp
@@ -263,6 +277,7 @@ target_include_directories(spratcore PUBLIC src)
 target_include_directories(spratcore SYSTEM PRIVATE ${STB_DIR})
 target_include_directories(spratcore PRIVATE ${LIBARCHIVE_INCLUDE_DIRS})
 target_link_libraries(spratcore PRIVATE ${LIBARCHIVE_LIBRARIES})
+target_link_libraries(spratcore PRIVATE libjsonnet++ libjsonnet_static)
 if(SPRAT_GETTEXT_AVAILABLE)
     target_compile_definitions(spratcore PUBLIC SPRAT_ENABLE_GETTEXT)
     target_link_libraries(spratcore PUBLIC ${SPRAT_INTL_LIBRARIES})

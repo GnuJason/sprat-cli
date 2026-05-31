@@ -457,7 +457,7 @@ Example layout line:
 ## Layout transforms (`spratconvert`)
 
 `spratconvert` reads layout text from stdin and writes transformed output to stdout.
-The term `transform` is used because conversion is template-driven and data-oriented.
+Transforms are [Jsonnet](https://jsonnet.org/) files that receive the full layout data and produce any text format for your game engine or pipeline.
 
 List built-in transforms:
 
@@ -471,7 +471,7 @@ Use a built-in transform:
 ./build/spratconvert --transform json < layout.txt > layout.json
 ```
 
-If your template uses `{{atlas_path}}`/`{{atlas_index}}`, provide `--atlas` so paths are deterministic:
+Provide `--atlas` so atlas paths are deterministic in multi-atlas layouts:
 
 ```sh
 ./build/spratconvert --transform json --atlas atlas_%d.png < layout.txt > layout.json
@@ -484,10 +484,11 @@ Automatically group sprites into animations based on their filenames (e.g., `her
 ```
 
 ### Pivot Points
-You can define pivot points (anchors) for your sprites using markers.
+Define pivot points (anchors) for sprites using markers.
 1.  **Per-sprite pivot**: Add a marker named `pivot` of type `point` to a specific sprite.
-2.  **Global pivot**: Add a marker named `pivot` of type `point` without a `path` (or at the top level).
-`spratconvert` will automatically populate `{{pivot_x}}` and `{{pivot_y}}` placeholders using these markers.
+2.  **Global pivot**: Add a marker named `pivot` of type `point` without a `path`.
+
+`spratconvert` resolves pivot positions and exposes them as `pivot_x`, `pivot_y`, `pivot_x_norm`, `pivot_y_norm`, and `pivot_y_norm_raw` on each sprite object.
 
 Example `markers.txt`:
 ```txt
@@ -505,6 +506,8 @@ Optional extra data files:
 ./build/spratconvert --transform json --markers markers.txt --animations animations.txt < layout.txt > layout.json
 ```
 
+### Transform search paths
+
 Transform files are searched in:
 1. `{exe_dir}/transforms/` (beside the executable, portable install)
 2. User data dir:
@@ -513,66 +516,146 @@ Transform files are searched in:
    - Windows: `%APPDATA%\sprat\transforms\`
 3. `/usr/local/share/sprat/transforms/` (Global)
 
-Built-in transform files:
+### Built-in transforms
 
-- `json.transform`
-- `csv.transform`
-- `xml.transform`
-- `css.transform`
-- `unity.json.transform`
-- `unity.meta.transform`
+| Name | Output | Notes |
+|------|--------|-------|
+| `json` | JSON | Generic metadata: sprites, atlases, animations, markers |
+| `csv` | CSV | Flat spreadsheet-friendly list |
+| `xml` | XML | Generic XML |
+| `css` | CSS | CSS sprite sheet |
+| `aseprite` | JSON | Aseprite JSON Array format; frameTags built from animations (non-contiguous animations become multiple tags) |
+| `libgdx` | Text | LibGDX Atlas format; handles multipack |
+| `godot` | JSON | Godot SpriteFrames resource |
+| `phaser-hash` | JSON | Phaser 3 hash-keyed sprite sheet |
+| `phaser-array` | JSON | Phaser 3 array-keyed sprite sheet |
+| `phaser-anims` | JSON | Phaser 3 animation config |
+| `plist` | plist | Apple / TexturePacker plist |
+| `unity` | Group | `unity.json` + `unity.meta` + one `unity.anim` per animation; requires `--output-dir` |
 
-The built-in JSON transform (`--transform json`) produces a top-level `atlases` array (each entry has `width`, `height`, `path`) and a flat top-level `sprites` array. Sprite spatial data is grouped into nested objects: `rect` (`x`, `y`, `w`, `h`), `pivot` (`x`, `y`), and `trim` (`left`, `top`, `right`, `bottom`). Use `atlas_index` in each sprite entry to associate it with an atlas when multipacking.
+### Transform format
 
-Each transform is section-based. You can use explicit open/close tags (e.g., `[meta]` ... `[/meta]`) or the modern line-based DSL (e.g., `meta`, `header`, `sprites`, `- sprite`).
+Each transform is a Jsonnet file that evaluates to a JSON object:
 
-- `[meta]` / `meta`: metadata like `name`, `description`, `extension`
-- `[header]` / `header`: printed once before sprites
-- `[if_markers]` / `[if_no_markers]` conditional blocks based on marker items
-- `[markers_header]`, `[markers]`, `[marker]`, `[markers_separator]`, `[markers_footer]` marker loop sections
-- `[sprites]` / `sprites`: container with `[sprite]` / `- sprite` item template repeated for each sprite (required)
-- `[separator]` / `separator`: inserted between sprite entries
-- `[if_animations]` / `[if_no_animations]` conditional blocks based on animation items
-- `[animations_header]`, `[animations]`, `[animation]`, `[animations_separator]`, `[animations_footer]` animation loop sections
-- `[footer]` / `footer`: printed once after sprites
-- `[if ATTR="VALUE"]...[/if]` or `[if ATTR!="VALUE"]...[/if]`: conditional block emitted only when the variable `ATTR` equals (or does not equal) `VALUE`. At the top level, supports `has_markers` and `has_animations` (e.g., `[if has_animations="true"]`); within section content, any current rendering variable can be tested (e.g., `[if marker_type="point"]`).
+- `name` — display name
+- `description` — shown by `--list-transforms`
+- `extension` — output file extension (e.g. `".json"`)
+- `content` — string output for a single file
+- `files` — array of `{filename, content}` for multi-file output; mutually exclusive with `content`, requires `--output-dir`
 
-Common placeholders:
+The layout data is available as `std.extVar("sprat")`:
 
-- `{{atlas_width}}`, `{{atlas_height}}`, `{{scale}}`, `{{sprite_count}}`
-- `{{index}}`, `{{name}}`, `{{path}}`, `{{x}}`, `{{y}}`, `{{w}}`, `{{h}}`
-- `{{unity_y}}` (Y-coordinate flipped for Unity: `atlas_height - y - h`)
-- `{{pivot_x}}`, `{{pivot_y}}` (resolved from "pivot" markers; in pixels relative to original sprite)
-- `{{pivot_x_norm}}`, `{{pivot_y_norm}}` (normalized 0.0 to 1.0; `pivot_y_norm` is flipped for Unity: `1.0 - (py/sh)`)
-- `{{pivot_y_norm_raw}}` (normalized Y without flipping)
-- `{{name_hash}}`, `{{name_hash_hex}}` (FNV-1a hash of the sprite name; useful for stable IDs)
-- `{{src_x}}`, `{{src_y}}`, `{{trim_left}}`, `{{trim_top}}`, `{{trim_right}}`, `{{trim_bottom}}`
-- `{{rotation}}` (numeric degrees; `0` when unrotated, `90` when rotated clockwise; built-in transforms use this field)
-- `[rotated]...[/rotated]` sections inside sprite templates emit their contents only for rotated sprites; non-rotated sprites have the block removed automatically.
-- `{{rotated}}` (`true` when the sprite was packed with 90-degree rotation, otherwise `false`; available for custom templates)
-- You can also guard sections by `type` attributes (for example `[markers type="json"]` or `[marker type="circle"]`) to emit format-specific or marker-type-specific content. Non-matching blocks are dropped automatically.
-- Escaped sprite fields: `{{name_json}}`, `{{name_csv}}`, `{{name_xml}}`, `{{name_css}}`, `{{path_json}}`, `{{path_csv}}`, `{{path_xml}}`, `{{path_css}}`
-- Per-sprite markers: `{{sprite_markers_count}}`, `{{sprite_markers_json}}`, `{{sprite_markers_csv}}`, `{{sprite_markers_xml}}`, `{{sprite_markers_css}}`
-- Marker loop placeholders:
-  - `{{marker_index}}`, `{{marker_name}}`, `{{marker_type}}`
-  - `{{marker_x}}`, `{{marker_y}}`, `{{marker_radius}}`, `{{marker_w}}`, `{{marker_h}}`
-  - `{{marker_vertices}}`, `{{marker_vertices_json}}`, `{{marker_vertices_csv}}`, `{{marker_vertices_xml}}`, `{{marker_vertices_css}}`
-  - `{{marker_sprite_index}}`, `{{marker_sprite_name}}`, `{{marker_sprite_path}}`
-- Animation loop placeholders:
-  - `{{animation_index}}`, `{{animation_name}}`
-  - `{{animation_sprite_count}}`, `{{animation_sprite_indexes}}`, `{{animation_sprite_indexes_json}}`, `{{animation_sprite_indexes_csv}}`
-  - `{{sprite_names}}`, `{{sprite_names_json}}`, `{{sprite_names_csv}}` (display names of the sprites belonging to this animation)
-- Extra file placeholders:
-  - `{{has_markers}}`, `{{has_animations}}`, `{{marker_count}}`, `{{animation_count}}`
-  - `{{markers_path}}`, `{{animations_path}}`
-  - `{{markers_raw}}`, `{{animations_raw}}`
-  - `{{markers_json}}`, `{{markers_csv}}`, `{{markers_xml}}`, `{{markers_css}}`
-  - `{{animations_json}}`, `{{animations_csv}}`, `{{animations_xml}}`, `{{animations_css}}`
+```jsonnet
+local sprat = std.extVar("sprat");
+```
 
-Typed placeholders (`*_json`, `*_xml`, `*_csv`, `*_css`) are the explicit format-safe form and should be preferred.
-Unsuffixed placeholders (for example `{{name}}`, `{{marker_name}}`, `{{marker_vertices}}`) are auto-encoded using `meta.extension` (fallback: transform name/argument) when the output format is JSON/XML/CSV/CSS.
+**Global fields:**
 
-Sprite names default to the source file basename without extension (for example `./frames/run_01.png` becomes `run_01`).
+| Field | Type | Description |
+|---|---|---|
+| `sprites` | array | All sprites across all atlases |
+| `atlases` | array | Each entry has `index`, `width`, `height`, `path`, `sprites` |
+| `animations` | array | Animation definitions |
+| `markers` | array | All markers across all sprites |
+| `atlas_width`, `atlas_height` | number | First atlas dimensions |
+| `atlas_path`, `atlas_stem` | string | First atlas path and stem |
+| `atlas_count` | number | Total atlas count |
+| `multipack` | boolean | `true` when layout declares `multipack true` |
+| `scale`, `extrude` | number | Layout-level values |
+| `has_animations`, `has_markers` | boolean | Whether extra files were loaded |
+| `animation_count`, `marker_count`, `sprite_count` | number | Counts |
+| `output_stem`, `output_stem_hash_hex` | string | Output stem and its FNV-1a hex hash |
+| `animations_path`, `markers_path` | string | Paths to the extra files |
+
+**Per sprite (`sprites[]`):**
+
+| Field | Description |
+|---|---|
+| `index`, `name`, `path`, `atlas_index` | Identity |
+| `x`, `y`, `w`, `h` | Packed rectangle in the atlas |
+| `content_w`, `content_h` | Dimensions accounting for rotation |
+| `source_w`, `source_h` | Original size including trim margins |
+| `trim_left`, `trim_top`, `trim_right`, `trim_bottom`, `has_trim` | Trim margins |
+| `rotated` | `true` when packed rotated 90° clockwise |
+| `unity_y` | `atlas_height - y - h` (Y-up coordinate for Unity) |
+| `pivot_x`, `pivot_y` | Pivot in pixels from marker lookup (0 if not set) |
+| `pivot_x_norm`, `pivot_y_norm` | Normalized; `pivot_y_norm` is Y-up (Unity convention) |
+| `pivot_y_norm_raw` | Normalized Y-down |
+| `name_hash_hex` | 16-char FNV-1a hex string |
+| `name_hash_decimal` | FNV-1a as a decimal string (serialized as JSON string to avoid float precision loss) |
+| `name_css` | CSS-safe identifier |
+| `markers` | Array of marker objects attached to this sprite |
+
+**Per animation (`animations[]`):**
+
+| Field | Description |
+|---|---|
+| `index`, `name`, `fps`, `duration` | Identity and timing |
+| `frame_indices` | Global sprite index sequence (may be non-contiguous) |
+| `frames` | `[{index, name, name_hash_decimal, name_hash_hex}]` resolved per frame |
+| `is_alias`, `alias_source`, `flip` | Alias support |
+
+**Per marker (`markers[]` and `sprite.markers[]`):**
+
+| Field | Description |
+|---|---|
+| `index`, `name`, `type` | Identity; `type` is `point`, `circle`, `rectangle`, or `polygon` |
+| `x`, `y`, `radius`, `w`, `h`, `vertices` | Geometry (fields present depend on type) |
+| `sprite_index`, `sprite_name`, `sprite_path` | Owning sprite |
+
+### Shared helpers (`sprat.libsonnet`)
+
+All transforms in the transforms directory can import shared helpers:
+
+```jsonnet
+local lib = import "sprat.libsonnet";
+```
+
+- `lib.format_double(v)` — formats a float like C's `%.8g` (works around a known Jsonnet v0.20 `%g` bug)
+- `lib.consecutive_runs(indices)` — splits an index array into contiguous ranges `[{from, to}]`; used by the Aseprite transform to build frameTags from non-contiguous animations
+
+### Custom transforms
+
+A transform is any `.jsonnet` file. Pass a path directly to `--transform`:
+
+```jsonnet
+local sprat = std.extVar("sprat");
+{
+  name: "compact-log",
+  description: "One line per sprite",
+  extension: ".txt",
+  content:
+    "atlas=%dx%d sprites=%d\n" % [sprat.atlas_width, sprat.atlas_height, sprat.sprite_count] +
+    std.join("\n", [
+      "%d %s @ %d,%d %dx%d" % [s.index, s.path, s.x, s.y, s.w, s.h]
+      for s in sprat.sprites
+    ]) + "\n",
+}
+```
+
+```sh
+./build/spratconvert --transform ./my.jsonnet < layout.txt > output.txt
+```
+
+Multi-file output — return `files` instead of `content` and use `--output-dir`:
+
+```jsonnet
+local sprat = std.extVar("sprat");
+{
+  name: "one-per-anim",
+  extension: ".txt",
+  files: [
+    { filename: anim.name + ".txt", content: anim.name + ": " + anim.fps + "fps\n" }
+    for anim in sprat.animations
+  ],
+}
+```
+
+```sh
+./build/spratconvert --transform ./per-anim.jsonnet --output-dir ./out < layout.txt
+```
+
+Sprite names default to the source file basename without extension (e.g. `./frames/run_01.png` becomes `run_01`).
 
 `--markers` expects a plaintext file using the `path` and `- marker` DSL.
 An optional `root` directive sets a base directory; `path` values that are relative are resolved against it.
@@ -604,39 +687,6 @@ animation "run" 8
 - frame "b"
 animation "idle"
 - frame 1
-```
-
-Custom transform example:
-
-```ini
-[meta]
-name=compact-log
-[/meta]
-
-[header]
-atlas={{atlas_width}}x{{atlas_height}} sprites={{sprite_count}}
-[/header]
-
-[sprites]
-  [sprite]
-{{index}} {{path}} @ {{x}},{{y}} {{w}}x{{h}}
-  [/sprite]
-[/sprites]
-
-[separator]
-;
-[/separator]
-
-[footer]
-
-done
-[/footer]
-```
-
-Run custom transform:
-
-```sh
-./build/spratconvert --transform ./my.transform < layout.txt > layout.custom.txt
 ```
 
 Column meanings for the `sprite` line in trim mode:

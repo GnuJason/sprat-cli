@@ -23,11 +23,22 @@ path "player.png"
 - marker "pivot" point 20,30
 MARKERS
 
-custom_transform="$tmp_dir/test.transform"
+custom_transform="$tmp_dir/test.jsonnet"
 cat > "$custom_transform" <<'CUSTOM'
-[sprite]
-y={{y}} unity_y={{unity_y}} pxn={{pivot_x_norm}} pyn={{pivot_y_norm}} pynr={{pivot_y_norm_raw}} nh={{name_hash}} nhh={{name_hash_hex}}
-[/sprite]
+local sprat = std.extVar("sprat");
+local lib = import "sprat.libsonnet";
+local sprite_line(s) =
+  "y=" + s.y + " unity_y=" + s.unity_y +
+  " pxn=" + lib.format_double(s.pivot_x_norm) +
+  " pyn=" + lib.format_double(s.pivot_y_norm) +
+  " pynr=" + lib.format_double(s.pivot_y_norm_raw) +
+  " nh=" + s.name_hash_decimal +
+  " nhh=" + s.name_hash_hex;
+{
+  name: "test",
+  extension: "",
+  content: std.join("\n", [sprite_line(s) for s in sprat.sprites]) + "\n",
+}
 CUSTOM
 
 "$convert_bin" --transform "$custom_transform" --markers "$markers_file" < "$layout_file" > "$tmp_dir/out.txt"
