@@ -117,6 +117,7 @@ endfunction()
 
 ensure_stb_header(stb_image.h)
 ensure_stb_header(stb_image_write.h)
+ensure_stb_header(stb_image_resize2.h)
 
 option(SPRAT_ENABLE_NLS "Enable gettext-based translations when available" ON)
 option(SPRAT_REQUIRE_GETTEXT "Fail configure if gettext support is requested but unavailable" OFF)

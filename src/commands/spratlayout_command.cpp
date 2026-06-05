@@ -1,6 +1,6 @@
 // spratlayout.cpp
 // MIT License (c) 2026 Pedro
-// Compile: g++ -std=c++17 -O2 src/spratlayout.cpp -o spratlayout
+// Compile: g++ -std=c++20 -O2 src/spratlayout.cpp -o spratlayout
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -750,15 +750,6 @@ bool checked_mul_size_t(size_t a, size_t b, size_t& out) {
     return false;
 }
 
-inline bool pixel_is_opaque(const unsigned char* rgba, int width, int x, int y) {
-    if (rgba == nullptr || width <= 0 || x < 0 || y < 0 || x >= width) {
-        return false;
-    }
-    const size_t pixel_index = (static_cast<size_t>(y) * static_cast<size_t>(width)) + static_cast<size_t>(x);
-    const size_t alpha_index = (pixel_index * static_cast<size_t>(4)) + static_cast<size_t>(3);
-    return rgba[alpha_index] != 0;
-}
-
 bool compute_trim_bounds(const unsigned char* rgba,
                          int w,
                          int h,
@@ -950,101 +941,116 @@ bool is_compressed_tar_file(const fs::path& path) {
     return detect_content_type_from_path(path) == ContentType::CompressedTarFile;
 }
 
+// Returns an empty path if entry_name would escape output_dir (Zip Slip guard).
+fs::path safe_extract_path(const fs::path& output_dir, const char* entry_name) {
+    if (entry_name == nullptr) {
+        return {};
+    }
+    fs::path entry(entry_name);
+    if (entry.is_absolute()) {
+        return {};
+    }
+    fs::path candidate = (output_dir / entry).lexically_normal();
+    fs::path rel = candidate.lexically_relative(output_dir.lexically_normal());
+    if (rel.empty() || rel.begin()->string() == "..") {
+        return {};
+    }
+    return candidate;
+}
+
 bool extract_tar_file(const fs::path& tar_path, const fs::path& output_dir) {
     struct archive* a = archive_read_new();
     if (a == nullptr) {
         std::cerr << tr("Error: Failed to create archive reader") << '\n';
         return false;
     }
-    
+
     // Enable all supported formats and compression
     archive_read_support_format_all(a);
     archive_read_support_filter_all(a);
-    
+
     if (archive_read_open_filename(a, tar_path.string().c_str(), k_tar_read_buffer_size) != ARCHIVE_OK) {
         std::cerr << tr("Error: Failed to open archive file: ") << archive_error_string(a) << '\n';
         archive_read_free(a);
         return false;
     }
-    
+
     struct archive* ext = archive_write_disk_new();
     if (ext == nullptr) {
         std::cerr << tr("Error: Failed to create archive writer") << '\n';
         archive_read_free(a);
         return false;
     }
-    
+
     archive_write_disk_set_options(ext, ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_ACL | ARCHIVE_EXTRACT_FFLAGS);
-    
-    la_ssize_t r = 0;
+
+    bool had_error = false;
     struct archive_entry* entry = nullptr;
-    
+
     while (true) {
-        r = archive_read_next_header(a, &entry);
+        la_ssize_t r = archive_read_next_header(a, &entry);
         if (r == ARCHIVE_EOF) {
             break;
         }
         if (r < ARCHIVE_OK) {
             std::cerr << tr("Error: Failed to read archive header: ") << archive_error_string(a) << '\n';
+            had_error = true;
             break;
         }
-        
+
         // Skip directories
         if (archive_entry_filetype(entry) == AE_IFDIR) {
             continue;
         }
-        
-        // Get the filename
-        const char* filename = archive_entry_pathname(entry);
-        if (filename == nullptr) {
+
+        // Validate and resolve extraction path (guards against Zip Slip)
+        fs::path output_path = safe_extract_path(output_dir, archive_entry_pathname(entry));
+        if (output_path.empty()) {
+            std::cerr << tr("Warning: Skipping archive entry with unsafe path: ")
+                      << (archive_entry_pathname(entry) ? archive_entry_pathname(entry) : "(null)") << '\n';
             continue;
         }
-        
-        // Extract to the correct path (preserving directory structure)
-        fs::path file_path(filename);
-        fs::path output_path = output_dir / file_path;
-        
+
         // Create parent directory if needed
         std::error_code ec;
         fs::create_directories(output_path.parent_path(), ec);
-        
+
         // Set the extraction path
         archive_entry_set_pathname(entry, output_path.string().c_str());
-        
+
         // Extract the file
         r = archive_write_header(ext, entry);
         if (r < ARCHIVE_OK) {
             std::cerr << tr("Error: Failed to write archive header: ") << archive_error_string(ext) << '\n';
+            had_error = true;
         } else {
             const void* buff = nullptr;
             size_t size = 0;
             la_int64_t offset = 0;
-            
+            bool block_error = false;
+
             while (archive_read_data_block(a, &buff, &size, &offset) == ARCHIVE_OK) {
-                r = archive_write_data_block(ext, buff, size, offset);
-                if (r < ARCHIVE_OK) {
+                if (archive_write_data_block(ext, buff, size, offset) < ARCHIVE_OK) {
                     std::cerr << tr("Error: Failed to write archive data: ") << archive_error_string(ext) << '\n';
+                    had_error = true;
+                    block_error = true;
                     break;
                 }
             }
-            
-            if (r < ARCHIVE_OK) {
-                std::cerr << tr("Error: Failed to read archive data: ") << archive_error_string(a) << '\n';
+
+            if (!block_error && archive_write_finish_entry(ext) < ARCHIVE_OK) {
+                std::cerr << tr("Error: Failed to finish archive entry: ") << archive_error_string(ext) << '\n';
+                had_error = true;
             }
         }
-        
-        r = archive_write_finish_entry(ext);
-        if (r < ARCHIVE_OK) {
-            std::cerr << tr("Error: Failed to finish archive entry: ") << archive_error_string(ext) << '\n';
-        }
     }
-    
+
     archive_read_close(a);
     archive_read_free(a);
     archive_write_close(ext);
     archive_write_free(ext);
-    
-    return true;
+
+    return !had_error;
 }
 
 bool extract_tar_from_stdin(const fs::path& output_dir) {
@@ -1073,76 +1079,74 @@ bool extract_tar_from_stdin(const fs::path& output_dir) {
     }
     
     archive_write_disk_set_options(ext, ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_ACL | ARCHIVE_EXTRACT_FFLAGS);
-    
-    la_ssize_t r = 0;
+
+    bool had_error = false;
     struct archive_entry* entry = nullptr;
-    
+
     while (true) {
-        r = archive_read_next_header(a, &entry);
+        la_ssize_t r = archive_read_next_header(a, &entry);
         if (r == ARCHIVE_EOF) {
             break;
         }
         if (r < ARCHIVE_OK) {
             std::cerr << tr("Error: Failed to read archive header: ") << archive_error_string(a) << '\n';
+            had_error = true;
             break;
         }
-        
+
         // Skip directories
         if (archive_entry_filetype(entry) == AE_IFDIR) {
             continue;
         }
-        
-        // Get the filename
-        const char* filename = archive_entry_pathname(entry);
-        if (filename == nullptr) {
+
+        // Validate and resolve extraction path (guards against Zip Slip)
+        fs::path output_path = safe_extract_path(output_dir, archive_entry_pathname(entry));
+        if (output_path.empty()) {
+            std::cerr << tr("Warning: Skipping archive entry with unsafe path: ")
+                      << (archive_entry_pathname(entry) ? archive_entry_pathname(entry) : "(null)") << '\n';
             continue;
         }
-        
-        // Extract to the correct path (preserving directory structure)
-        fs::path file_path(filename);
-        fs::path output_path = output_dir / file_path;
-        
+
         // Create parent directory if needed
         std::error_code ec;
         fs::create_directories(output_path.parent_path(), ec);
-        
+
         // Set the extraction path
         archive_entry_set_pathname(entry, output_path.string().c_str());
-        
+
         // Extract the file
         r = archive_write_header(ext, entry);
         if (r < ARCHIVE_OK) {
             std::cerr << tr("Error: Failed to write archive header: ") << archive_error_string(ext) << '\n';
+            had_error = true;
         } else {
             const void* buff = nullptr;
             size_t size = 0;
             la_int64_t offset = 0;
-            
+            bool block_error = false;
+
             while (archive_read_data_block(a, &buff, &size, &offset) == ARCHIVE_OK) {
-                r = archive_write_data_block(ext, buff, size, offset);
-                if (r < ARCHIVE_OK) {
+                if (archive_write_data_block(ext, buff, size, offset) < ARCHIVE_OK) {
                     std::cerr << tr("Error: Failed to write archive data: ") << archive_error_string(ext) << '\n';
+                    had_error = true;
+                    block_error = true;
                     break;
                 }
             }
-            
-            if (r < ARCHIVE_OK) {
-                std::cerr << tr("Error: Failed to read archive data: ") << archive_error_string(a) << '\n';
+
+            if (!block_error && archive_write_finish_entry(ext) < ARCHIVE_OK) {
+                std::cerr << tr("Error: Failed to finish archive entry: ") << archive_error_string(ext) << '\n';
+                had_error = true;
             }
         }
-        
-        r = archive_write_finish_entry(ext);
-        if (r < ARCHIVE_OK) {
-            std::cerr << tr("Error: Failed to finish archive entry: ") << archive_error_string(ext) << '\n';
-        }
     }
-    
+
     archive_read_close(a);
     archive_read_free(a);
     archive_write_close(ext);
     archive_write_free(ext);
-    
-    return true;
+
+    return !had_error;
 }
 
 enum class InputType : std::uint8_t {
@@ -1168,8 +1172,10 @@ bool detect_and_extract_tar_content(const fs::path& input_path, InputContext& ou
     out_context.temp_dirs_to_cleanup.clear();
     
     if (is_tar || is_compressed_tar) {
-        // Create a temporary directory for extraction
-        fs::path temp_dir = fs::temp_directory_path() / "spratlayout_extract";
+        // Use a unique directory per invocation to avoid races between concurrent processes.
+        static std::atomic<unsigned int> extract_counter{0};
+        fs::path temp_dir = fs::temp_directory_path()
+            / ("spratlayout_extract_" + std::to_string(extract_counter.fetch_add(1)));
         std::error_code ec;
         fs::create_directories(temp_dir, ec);
         if (ec) {
@@ -1206,8 +1212,10 @@ bool detect_and_extract_tar_content(const fs::path& input_path, InputContext& ou
 }
 
 bool load_content_from_stdin(InputContext& out_context) {
-    // Create a temporary directory for extraction
-    fs::path temp_dir = fs::temp_directory_path() / "spratlayout_extract_stdin";
+    // Use a unique directory per invocation to avoid races between concurrent processes.
+    static std::atomic<unsigned int> stdin_counter{0};
+    fs::path temp_dir = fs::temp_directory_path()
+        / ("spratlayout_extract_stdin_" + std::to_string(stdin_counter.fetch_add(1)));
     std::error_code ec;
     fs::create_directories(temp_dir, ec);
     if (ec) {
@@ -1424,11 +1432,13 @@ fs::path build_cache_path(const fs::path& folder) {
     std::error_code ec;
     fs::path normalized = fs::absolute(folder, ec);
     std::string folder_key = (!ec ? normalized.lexically_normal().string() : folder.string());
-    size_t hash = std::hash<std::string>{}(folder_key);
+    uint64_t hash = sprat::core::fnv1a_hash(
+        reinterpret_cast<const unsigned char*>(folder_key.data()), folder_key.size());
 
-    std::ostringstream name;
-    name << "spratlayout_" << std::hex << hash << ".cache";
-    return cache_root_dir() / name.str();
+    std::array<char, 40> buf{};
+    std::snprintf(buf.data(), buf.size(), "spratlayout_%016llx.cache",
+                  static_cast<unsigned long long>(hash));
+    return cache_root_dir() / buf.data();
 }
 
 fs::path build_output_cache_path(const fs::path& base_cache_path,
@@ -3403,18 +3413,10 @@ int run_spratlayout(int argc, char** argv) {
             has_max_height_limit = true;
         } else if (arg == "--padding" && i + 1 < argc) {
             std::string value = argv[++i];
-            try {
-                size_t idx = 0;
-                padding = std::stoi(value, &idx);
-                if (idx != value.size()) {
-                    std::cerr << tr("Invalid padding value: ") << value << "\n";
-                    return 1;
-                }
-            } catch (const std::exception&) {
+            if (!parse_non_negative_int(value, padding)) {
                 std::cerr << tr("Invalid padding value: ") << value << "\n";
                 return 1;
             }
-            padding = std::max(padding, 0);
             has_padding_override = true;
         } else if (arg == "--extrude" && i + 1 < argc) {
             std::string value = argv[++i];

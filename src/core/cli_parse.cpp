@@ -26,7 +26,7 @@ bool parse_non_negative_int(const std::string& value, int& out) {
     if (ec != std::errc() || ptr != value.data() + value.size()) {
         return false;
     }
-    if (parsed < 0 || parsed > std::numeric_limits<int>::max()) {
+    if (parsed < 0) {
         return false;
     }
     out = parsed;

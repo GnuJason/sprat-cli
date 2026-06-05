@@ -84,12 +84,12 @@ using sprat::core::validate_output_pattern;
 
 std::string trim_copy(const std::string& s) {
     size_t start = 0;
-    while (start < s.size() && std::isspace(static_cast<unsigned char>(s.at(start))) != 0) {
+    while (start < s.size() && std::isspace(static_cast<unsigned char>(s[start])) != 0) {
         ++start;
     }
 
     size_t end = s.size();
-    while (end > start && std::isspace(static_cast<unsigned char>(s.at(end - 1))) != 0) {
+    while (end > start && std::isspace(static_cast<unsigned char>(s[end - 1])) != 0) {
         --end;
     }
 

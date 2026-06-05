@@ -1,8 +1,9 @@
 // spratunpack.cpp
 // MIT License (c) 2026 Pedro
-// Compile: g++ -std=c++17 -O2 src/spratunpack.cpp -o spratunpack
+// Compile: g++ -std=c++20 -O2 src/spratunpack.cpp -o spratunpack
 
 #include <algorithm>
+#include <charconv>
 #include <iostream>
 #include <utility>
 #include <vector>
@@ -88,15 +89,16 @@ public:
     SpriteUnpacker(Config  config) : config_(std::move(config)) {}
 
     bool run() {
-        if (!load_frames()) { return false;
-}
-        if (!load_image()) { return false;
-}
-
+        if (!load_frames()) {
+            return false;
+        }
+        if (!load_image()) {
+            return false;
+        }
         if (config_.stdout_mode) {
             return unpack_to_stdout();
-        }             return unpack_to_dir();
-       
+        }
+        return unpack_to_dir();
     }
 
 private:
@@ -376,34 +378,39 @@ private:
         // Detect if frames is an object or array
         constexpr size_t JSON_FRAMES_KEY_OFFSET = 9; // strlen("\"frames\":")
         size_t search_pos = frames_start + JSON_FRAMES_KEY_OFFSET;
-        while (search_pos < content.size() && (std::isspace(content[search_pos]) != 0)) { search_pos++;
-}
-        
+        while (search_pos < content.size() && (std::isspace(content[search_pos]) != 0)) {
+            search_pos++;
+        }
+
         if (search_pos < content.size() && content[search_pos] == '[') {
             return parse_json_array(content.substr(search_pos));
-        }             return parse_json_object(content.substr(search_pos));
-       
+        }
+        return parse_json_object(content.substr(search_pos));
     }
 
     bool parse_json_object(const std::string& content) {
         size_t pos = 0;
         while (true) {
             size_t key_start = content.find('\"', pos);
-            if (key_start == std::string::npos) { break;
-}
+            if (key_start == std::string::npos) {
+                break;
+            }
             size_t key_end = content.find('\"', key_start + 1);
-            if (key_end == std::string::npos) { break;
-}
+            if (key_end == std::string::npos) {
+                break;
+            }
 
             std::string key = content.substr(key_start + 1, key_end - key_start - 1);
-            
+
             size_t obj_start = content.find('{', key_end);
-            if (obj_start == std::string::npos) { break;
-}
-            
+            if (obj_start == std::string::npos) {
+                break;
+            }
+
             size_t obj_end = find_closing_bracket(content, obj_start, '{', '}');
-            if (obj_end == std::string::npos) { break;
-}
+            if (obj_end == std::string::npos) {
+                break;
+            }
 
             std::string obj_content = content.substr(obj_start, obj_end - obj_start + 1);
             SpriteFrame frame;
@@ -421,12 +428,14 @@ private:
         size_t pos = 0;
         while (true) {
             size_t obj_start = content.find('{', pos);
-            if (obj_start == std::string::npos) { break;
-}
-            
+            if (obj_start == std::string::npos) {
+                break;
+            }
+
             size_t obj_end = find_closing_bracket(content, obj_start, '{', '}');
-            if (obj_end == std::string::npos) { break;
-}
+            if (obj_end == std::string::npos) {
+                break;
+            }
 
             std::string obj_content = content.substr(obj_start, obj_end - obj_start + 1);
             
@@ -485,31 +494,35 @@ private:
         if (pos == std::string::npos) {
             return 0;
         }
-        
+
         size_t val_start = pos + key.length();
         while (val_start < content.size() && ((std::isspace(content[val_start]) != 0) || content[val_start] == ':')) {
             val_start++;
         }
-        
+
         size_t val_end = val_start;
         while (val_end < content.size() && (std::isdigit(content[val_end]) != 0)) {
             val_end++;
         }
-        
+
         if (val_start == val_end) {
             return 0;
         }
-        return std::stoi(content.substr(val_start, val_end - val_start));
+        int result = 0;
+        std::from_chars(content.data() + val_start, content.data() + val_end, result);
+        return result;
     }
 
     static size_t find_closing_bracket(const std::string& s, size_t start, char open, char close) {
         int depth = 0;
         for (size_t i = start; i < s.size(); i++) {
-            if (s[i] == open) { depth++;
+            if (s[i] == open) {
+                depth++;
             } else if (s[i] == close) {
                 depth--;
-                if (depth == 0) { return i;
-}
+                if (depth == 0) {
+                    return i;
+                }
             }
         }
         return std::string::npos;
@@ -556,7 +569,6 @@ private:
         }
 
         // Use a callback to write to stdout directly
-        std::vector<unsigned char> archive_buffer;
         auto write_callback = [](struct archive* /*unused*/, void* /*client_data*/, const void* buffer, size_t length) -> la_ssize_t {
             std::cout.write(static_cast<const char*>(buffer), length);
             if (std::cout.fail()) { return -1;
@@ -588,13 +600,16 @@ private:
         return true;
     }
 
-    static bool unpack_to_tar(const fs::path& /*tar_path*/) {
-        // Not implemented for now, similar to stdout
-        return false;
-    }
-
     std::vector<unsigned char> extract_sprite_pixels(const SpriteFrame& frame) {
         const auto& bounds = frame.frame;
+
+        // Validate frame rectangle against loaded atlas dimensions.
+        if (bounds.w <= 0 || bounds.h <= 0 ||
+            bounds.x < 0 || bounds.y < 0 ||
+            bounds.x + bounds.w > width_ || bounds.y + bounds.h > height_) {
+            return {};
+        }
+
         const int out_w = frame.rotated ? bounds.h : bounds.w;
         const int out_h = frame.rotated ? bounds.w : bounds.h;
 
@@ -676,13 +691,34 @@ private:
         const int out_h = frame.rotated ? frame.frame.w : frame.frame.h;
 
         std::vector<unsigned char> sprite_data = extract_sprite_pixels(frame);
+        if (sprite_data.empty()) {
+            std::cerr << tr("Error: Frame ") << to_quoted(frame.name) << tr(" references pixels outside the atlas bounds\n");
+            return false;
+        }
 
-        fs::path output_path = config_.output_dir / frame.name;
+        // Reject frame names that escape the output directory (path traversal guard).
+        fs::path name_path(frame.name);
+        if (name_path.is_absolute()) {
+            std::cerr << tr("Error: Frame name is an absolute path: ") << to_quoted(frame.name) << "\n";
+            return false;
+        }
+        fs::path output_path = (config_.output_dir / name_path).lexically_normal();
+        fs::path rel = output_path.lexically_relative(config_.output_dir.lexically_normal());
+        if (rel.empty() || rel.begin()->string() == "..") {
+            std::cerr << tr("Error: Frame name escapes output directory: ") << to_quoted(frame.name) << "\n";
+            return false;
+        }
+
         if (output_path.extension().empty()) {
             output_path += ".png";
         }
 
-        fs::create_directories(output_path.parent_path());
+        std::error_code ec;
+        fs::create_directories(output_path.parent_path(), ec);
+        if (ec) {
+            std::cerr << tr("Error: Failed to create output directory for ") << to_quoted(frame.name) << "\n";
+            return false;
+        }
 
         return stbi_write_png(output_path.string().c_str(),
                              out_w, out_h, NUM_CHANNELS,

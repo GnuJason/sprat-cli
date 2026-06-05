@@ -1,6 +1,7 @@
 #include <utility>
 #include <stb_image.h>
 #include <stb_image_write.h>
+#include <stb_image_resize2.h>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -51,6 +52,17 @@
 namespace {
 
 constexpr size_t NUM_CHANNELS = 4;
+
+enum class ScaleFilter { nearest, bilinear, bicubic, mitchell };
+
+stbir_filter to_stbir_filter(ScaleFilter f) {
+    switch (f) {
+        case ScaleFilter::bilinear: return STBIR_FILTER_TRIANGLE;
+        case ScaleFilter::bicubic:  return STBIR_FILTER_CATMULLROM;
+        case ScaleFilter::mitchell: return STBIR_FILTER_MITCHELL;
+        default:                    return STBIR_FILTER_POINT_SAMPLE;
+    }
+}
 constexpr size_t CHANNEL_R = 0;
 constexpr size_t CHANNEL_G = 1;
 constexpr size_t CHANNEL_B = 2;
@@ -363,8 +375,8 @@ std::vector<unsigned char> compress_to_dds(
 
     // Compute compressed size (DXT1: width*height/2, DXT5: width*height)
     size_t compressed_bytes = (format == "dxt1" || format == "DXT1")
-                              ? (width * height) / 2
-                              : width * height;
+                              ? (static_cast<size_t>(width) * static_cast<size_t>(height)) / 2
+                              : static_cast<size_t>(width) * static_cast<size_t>(height);
 
     // Build minimal DDS header (128 bytes)
     struct DdsHeader {
@@ -445,6 +457,8 @@ void print_usage() {
               << tr("  --frame-lines          Draw rectangle outlines for each sprite\n")
               << tr("  --line-width N         Outline thickness in pixels (default: 1)\n")
               << tr("  --line-color R,G,B[,A] Outline color channels (0-255, default: 255,0,0,255)\n")
+              << tr("  --scale-filter FILTER  Resampling filter when source and target sizes differ:\n")
+              << tr("                           nearest (default), bilinear, bicubic, mitchell\n")
               << tr("  --threads N            Number of worker threads\n")
               << tr("  --debug                Enable detailed error reporting and debug visualization\n")
               << tr("  --protect              Protect output with basic obfuscation\n")
@@ -458,6 +472,7 @@ int run_spratpack(int argc, char** argv) {
     bool protect = false;
     bool use_zopfli = false;
     bool draw_frame_lines = false;
+    ScaleFilter scale_filter = ScaleFilter::nearest;
     int line_width = 1;
     constexpr unsigned char DEFAULT_COLOR_RED = 255;
     constexpr unsigned char DEFAULT_COLOR_ALPHA = 255;
@@ -533,6 +548,20 @@ int run_spratpack(int argc, char** argv) {
             std::string value = argv[++i];
             if (!parse_line_color(value, line_color)) {
                 std::cerr << tr("Invalid line color: ") << value << "\n";
+                return 1;
+            }
+        } else if (arg == "--scale-filter" && i + 1 < argc) {
+            std::string value = argv[++i];
+            if (value == "nearest") {
+                scale_filter = ScaleFilter::nearest;
+            } else if (value == "bilinear") {
+                scale_filter = ScaleFilter::bilinear;
+            } else if (value == "bicubic") {
+                scale_filter = ScaleFilter::bicubic;
+            } else if (value == "mitchell") {
+                scale_filter = ScaleFilter::mitchell;
+            } else {
+                std::cerr << tr("Invalid scale filter: ") << value << tr(" (must be nearest, bilinear, bicubic, or mitchell)\n");
                 return 1;
             }
         } else if (arg == "--threads" && i + 1 < argc) {
@@ -705,8 +734,13 @@ int run_spratpack(int argc, char** argv) {
                 return false;
             }
 
-            const bool copy_rows_direct = !s.rotated && (source_w == s.w && source_h == s.h);
-            if (copy_rows_direct) {
+            // Unrotated destination dimensions (rotation swaps w/h in the atlas slot)
+            const int dest_w = s.rotated ? s.h : s.w;
+            const int dest_h = s.rotated ? s.w : s.h;
+            const bool needs_scale = (source_w != dest_w || source_h != dest_h);
+
+            // Fast path: no rotation, no scaling
+            if (!s.rotated && !needs_scale) {
                 const size_t row_bytes = static_cast<size_t>(s.w) * NUM_CHANNELS;
                 for (int row = 0; row < s.h; ++row) {
                     const size_t dest_pixels = static_cast<size_t>(s.y + row) * atlas_width + s.x;
@@ -715,22 +749,58 @@ int run_spratpack(int argc, char** argv) {
                     const size_t src_offset = src_pixels * NUM_CHANNELS;
                     std::memcpy(atlas_data.data() + dest_offset, image_ptr.get() + src_offset, row_bytes);
                 }
+                return true;
+            }
+
+            // Source pointer and stride within the full loaded image
+            const unsigned char* src_ptr = image_ptr.get() +
+                (static_cast<size_t>(source_y) * w + source_x) * NUM_CHANNELS;
+            const int src_stride_bytes = w * static_cast<int>(NUM_CHANNELS);
+
+            // Scale if source and destination sizes differ
+            std::vector<unsigned char> scaled_buf;
+            const unsigned char* blit_ptr = src_ptr;
+            int blit_stride_bytes = src_stride_bytes;
+
+            if (needs_scale) {
+                scaled_buf.resize(static_cast<size_t>(dest_w) * dest_h * NUM_CHANNELS);
+                STBIR_RESIZE resize;
+                stbir_resize_init(&resize,
+                    src_ptr, source_w, source_h, src_stride_bytes,
+                    scaled_buf.data(), dest_w, dest_h, 0,
+                    STBIR_RGBA, STBIR_TYPE_UINT8_SRGB);
+                stbir_set_filters(&resize,
+                    to_stbir_filter(scale_filter), to_stbir_filter(scale_filter));
+                if (!stbir_resize_extended(&resize)) {
+                    error_out = "Error: Failed to resize image " + to_quoted(s.path);
+                    return false;
+                }
+                blit_ptr = scaled_buf.data();
+                blit_stride_bytes = dest_w * static_cast<int>(NUM_CHANNELS);
+            }
+
+            // Blit to atlas, handling 90° CW rotation if needed
+            if (!s.rotated) {
+                const size_t row_bytes = static_cast<size_t>(dest_w) * NUM_CHANNELS;
+                for (int row = 0; row < dest_h; ++row) {
+                    const size_t dest_off =
+                        (static_cast<size_t>(s.y + row) * atlas_width + s.x) * NUM_CHANNELS;
+                    const size_t src_off =
+                        static_cast<size_t>(row) * static_cast<size_t>(blit_stride_bytes);
+                    std::memcpy(atlas_data.data() + dest_off, blit_ptr + src_off, row_bytes);
+                }
             } else {
+                // atlas(s.x+col, s.y+row) <- source(px=row, py=dest_h-1-col)
                 for (int row = 0; row < s.h; ++row) {
                     for (int col = 0; col < s.w; ++col) {
-                        int sample_x, sample_y;
-                        if (!s.rotated) {
-                            sample_x = source_x + ((col * source_w) / s.w);
-                            sample_y = source_y + ((row * source_h) / s.h);
-                        } else {
-                            sample_x = source_x + ((row * source_w) / s.h);
-                            sample_y = source_y + (source_h - 1 - ((col * source_h) / s.w));
-                        }
-                        const size_t dest_pixels = static_cast<size_t>(s.y + row) * atlas_width + (s.x + col);
-                        const size_t dest_offset = dest_pixels * NUM_CHANNELS;
-                        const size_t src_pixels = static_cast<size_t>(sample_y) * w + sample_x;
-                        const size_t src_offset = src_pixels * NUM_CHANNELS;
-                        std::memcpy(atlas_data.data() + dest_offset, image_ptr.get() + src_offset, NUM_CHANNELS);
+                        const int px = row;
+                        const int py = dest_h - 1 - col;
+                        const size_t dest_off =
+                            (static_cast<size_t>(s.y + row) * atlas_width + (s.x + col)) * NUM_CHANNELS;
+                        const size_t src_off =
+                            static_cast<size_t>(py) * static_cast<size_t>(blit_stride_bytes) +
+                            static_cast<size_t>(px) * NUM_CHANNELS;
+                        std::memcpy(atlas_data.data() + dest_off, blit_ptr + src_off, NUM_CHANNELS);
                     }
                 }
             }
