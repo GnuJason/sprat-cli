@@ -542,6 +542,16 @@ install(TARGETS spratlayout spratpack spratconvert spratframes spratunpack
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES spratprofiles.cfg
     DESTINATION ${CMAKE_INSTALL_DATADIR}/sprat)
+install(CODE "
+    # Remove any stale compiled .transform files left by older installations;
+    # the current format is .jsonnet, which carries richer metadata (icons, etc.).
+    file(GLOB _old_transforms
+        \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATADIR}/sprat/transforms/*.transform\")
+    foreach(_f IN LISTS _old_transforms)
+        message(STATUS \"Removing obsolete transform file: \${_f}\")
+        file(REMOVE \"\${_f}\")
+    endforeach()
+")
 install(DIRECTORY transforms/
     DESTINATION ${CMAKE_INSTALL_DATADIR}/sprat/transforms)
 install(FILES man/sprat-cli.1
