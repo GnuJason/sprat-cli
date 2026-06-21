@@ -70,5 +70,6 @@ local body =
   name: "CSV",
   description: "CSV rows for spreadsheets and data tools",
   extension: ".csv",
+  icon: "icons/csv-svgrepo-com.svg",
   content: header + body,
 }

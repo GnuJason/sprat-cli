@@ -35,5 +35,6 @@ local result =
   name: "Godot",
   description: "Godot-compatible JSON sprite sheet (load at runtime with AtlasTexture/SpriteFrames)",
   extension: ".json",
+  icon: "icons/godot-svgrepo-com(1).svg",
   content: std.manifestJsonEx(result, " ") + "\n",
 }

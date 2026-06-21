@@ -73,6 +73,7 @@ local animations_section =
   name: "XML",
   description: "XML layout format for engine import pipelines",
   extension: ".xml",
+  icon: "icons/xml-svgrepo-com.svg",
   content:
     '<?xml version="1.0" encoding="UTF-8"?>\n' +
     '<layout multipack="' + sprat.multipack + '" scale="' + sprat.scale + '" extrude="' + sprat.extrude + '">\n' +

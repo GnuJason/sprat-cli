@@ -36,5 +36,6 @@ local result = {
   name: "JSON",
   description: "JSON metadata for scripting and runtime loading",
   extension: ".json",
+  icon: "icons/json-svgrepo-com.svg",
   content: std.manifestJsonEx(result, "  ") + "\n",
 }

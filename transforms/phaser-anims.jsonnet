@@ -18,5 +18,6 @@ local result = {
   name: "Phaser Animations",
   description: "Phaser 3 animation manager JSON (load separately via this.anims.fromJSON(); requires --atlas so frame keys resolve to the correct texture)",
   extension: ".json",
+  icon: "icons/phaser-logo.svg",
   content: std.manifestJsonEx(result, "  ") + "\n",
 }

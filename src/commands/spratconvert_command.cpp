@@ -940,6 +940,7 @@ struct TransformResult {
     std::string name;
     std::string description;
     std::string extension;
+    std::string icon;                          // optional relative path to icon
     // Exactly one of content or files is populated:
     std::string content;                        // single-file mode
     struct FileEntry { std::string filename; std::string content; };
@@ -1047,6 +1048,9 @@ bool parse_transform_result(const std::string& json, TransformResult& out, std::
     }
     if (find_json_string_value(json, "description", vs, ve)) {
         out.description = json_unescape_string(json, vs, ve);
+    }
+    if (find_json_string_value(json, "icon", vs, ve)) {
+        out.icon = json_unescape_string(json, vs, ve);
     }
     if (find_json_string_value(json, "extension", vs, ve)) {
         out.extension = json_unescape_string(json, vs, ve);
@@ -1206,11 +1210,98 @@ void list_transforms() {
             std::cout << " - " << result.description;
         }
         std::cout << "\n";
+        if (!result.icon.empty()) {
+            std::cout << "  " << (dir / result.icon).string() << "\n";
+        }
     }
     // Print group names
     for (const auto& grp : group_names_seen) {
         std::cout << grp << " (group)\n";
     }
+}
+
+void list_transforms_json() {
+    const fs::path dir = find_transforms_dir();
+
+    std::vector<fs::path> paths;
+    if (fs::exists(dir) && fs::is_directory(dir)) {
+        for (const auto& entry : fs::directory_iterator(dir)) {
+            if (!entry.is_regular_file()) continue;
+            if (entry.path().extension() == ".jsonnet") {
+                const std::string stem = entry.path().stem().string();
+                if (stem.find('.') != std::string::npos) continue;
+                paths.push_back(entry.path());
+            }
+        }
+    }
+
+    std::vector<std::string> group_names_seen;
+    if (fs::exists(dir) && fs::is_directory(dir)) {
+        for (const auto& entry : fs::directory_iterator(dir)) {
+            if (!entry.is_regular_file()) continue;
+            if (entry.path().extension() != ".jsonnet") continue;
+            const std::string stem = entry.path().stem().string();
+            const auto dot_pos = stem.find('.');
+            if (dot_pos == std::string::npos) continue;
+            const std::string grp = stem.substr(0, dot_pos);
+            if (std::find(group_names_seen.begin(), group_names_seen.end(), grp)
+                    == group_names_seen.end()) {
+                group_names_seen.push_back(grp);
+            }
+        }
+    }
+
+    std::ranges::sort(paths);
+
+    const std::string mock_json = R"({"sprites":[],"animations":[],"atlases":[],"markers":[],)"
+        R"("atlas_path":"","atlas_stem":"","atlas_width":0,"atlas_height":0,"atlas_count":0,)"
+        R"("multipack":false,"scale":1,"extrude":0,"sprite_count":0,"animation_count":0,)"
+        R"("marker_count":0,"output_pattern":"","output_stem":"","output_stem_hash_hex":"0000000000000000",)"
+        R"("has_animations":false,"has_markers":false,"animations_path":"","markers_path":"","fps":8})";
+
+    std::cout << "[\n";
+    bool first = true;
+
+    for (const auto& path : paths) {
+        std::string eval_error;
+        std::string output = evaluate_transform(path, mock_json, eval_error);
+        if (output.empty()) {
+            std::cerr << tr("Warning: ") << eval_error << "\n";
+            continue;
+        }
+        TransformResult result;
+        std::string parse_error;
+        if (!parse_transform_result(output, result, parse_error)) {
+            std::cerr << tr("Warning: ") << parse_error << "\n";
+            continue;
+        }
+        const std::string icon_abs = result.icon.empty()
+            ? std::string{}
+            : (dir / result.icon).string();
+
+        if (!first) std::cout << ",\n";
+        first = false;
+        std::cout << "  {\n"
+                  << "    \"name\": \""        << escape_json(result.name)        << "\",\n"
+                  << "    \"description\": \"" << escape_json(result.description) << "\",\n"
+                  << "    \"extension\": \""   << escape_json(result.extension)   << "\",\n"
+                  << "    \"icon\": \""        << escape_json(icon_abs)           << "\"\n"
+                  << "  }";
+    }
+
+    for (const auto& grp : group_names_seen) {
+        if (!first) std::cout << ",\n";
+        first = false;
+        std::cout << "  {\n"
+                  << "    \"name\": \""        << escape_json(grp) << "\",\n"
+                  << "    \"description\": \"\",\n"
+                  << "    \"extension\": \"\",\n"
+                  << "    \"icon\": \"\",\n"
+                  << "    \"group\": true\n"
+                  << "  }";
+    }
+
+    std::cout << "\n]\n";
 }
 
 void print_usage() {
@@ -1223,6 +1314,7 @@ void print_usage() {
               << tr("  --atlas, -a PATTERN        Atlas path pattern for atlas_* placeholders\n")
               << tr("  --output-dir PATH          Write output to PATH/{variant}{extension} instead of stdout\n")
               << tr("  --list-transforms          Print available transforms and exit\n")
+              << tr("  --list-transforms-json     Print available transforms as JSON and exit\n")
               << tr("  --transforms-dir           Print the transforms directory and exit\n")
               << tr("  --markers PATH             Load external markers file\n")
               << tr("  --animations PATH          Load external animations file\n")
@@ -1246,6 +1338,7 @@ int run_spratconvert(int argc, char** argv) {
     std::string output_pattern_arg;
     std::string output_dir_arg;
     bool list_only = false;
+    bool list_json_only = false;
     bool show_transforms_dir = false;
     bool auto_animations = false;
 
@@ -1265,6 +1358,8 @@ int run_spratconvert(int argc, char** argv) {
             auto_animations = true;
         } else if (arg == "--list-transforms") {
             list_only = true;
+        } else if (arg == "--list-transforms-json") {
+            list_json_only = true;
         } else if (arg == "--transforms-dir") {
             show_transforms_dir = true;
         } else if (arg == "--help" || arg == "-h") {
@@ -1286,6 +1381,11 @@ int run_spratconvert(int argc, char** argv) {
 
     if (list_only) {
         list_transforms();
+        return 0;
+    }
+
+    if (list_json_only) {
+        list_transforms_json();
         return 0;
     }
 

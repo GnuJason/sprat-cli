@@ -30,5 +30,6 @@ local header =
   name: "CSS",
   description: "CSS classes for web sprite rendering",
   extension: ".css",
+  icon: "icons/css-3-svgrepo-com.svg",
   content: header + std.join("\n", [sprite_css(s) for s in sprat.sprites]),
 }

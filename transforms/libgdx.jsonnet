@@ -22,5 +22,6 @@ local atlas_block(at) =
   name: "LibGDX",
   description: "LibGDX TextureAtlas format (.atlas); animation data is not part of this format",
   extension: ".atlas",
+  icon: "icons/libgdx.svg",
   content: std.join("", [atlas_block(at) for at in sprat.atlases]),
 }

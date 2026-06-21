@@ -32,5 +32,6 @@ local result = {
   name: "Unity JSON",
   description: "Unity-compatible JSON sprite sheet (TexturePacker JSON Hash format with normalized pivots)",
   extension: ".json",
+  icon: "icons/unity-svgrepo-com.svg",
   content: std.manifestJsonEx(result, "  ") + "\n",
 }

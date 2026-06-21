@@ -41,5 +41,6 @@ local result = {
   name: "Aseprite",
   description: "Aseprite JSON Array sprite sheet format (frameTags populated when animations are present)",
   extension: ".json",
+  icon: "icons/aseprite-svgrepo-com.svg",
   content: std.manifestJsonEx(result, "  ") + "\n",
 }

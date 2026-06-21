@@ -43,6 +43,7 @@ local plist_atlas_size = "{" + sprat.atlas_width + "," + sprat.atlas_height + "}
   name: "plist",
   description: "Cocos2d-x TextureAtlas plist format (format 2)",
   extension: ".plist",
+  icon: "icons/plist.svg",
   content:
     '<?xml version="1.0" encoding="UTF-8"?>\n' +
     '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n' +

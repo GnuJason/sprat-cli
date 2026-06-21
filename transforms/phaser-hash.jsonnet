@@ -30,5 +30,6 @@ local result = {
   name: "Phaser JSON Hash",
   description: "Phaser 3 atlas format (JSON Hash, compatible with TexturePacker JSON Hash output)",
   extension: ".json",
+  icon: "icons/phaser-logo.svg",
   content: std.manifestJsonEx(result, "  ") + "\n",
 }

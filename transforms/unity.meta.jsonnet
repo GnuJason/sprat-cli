@@ -34,6 +34,7 @@ local sprite_rect_entry(s) =
   name: "Unity Meta",
   description: "Unity .meta file spriteSheet section (YAML)",
   extension: ".meta",
+  icon: "icons/unity-svgrepo-com.svg",
   content:
     "fileFormatVersion: 2\n" +
     "guid: " + sprat.output_stem_hash_hex + "0000000000000000\n" +
