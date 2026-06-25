@@ -281,6 +281,13 @@ if(NOT jsonnet_POPULATED)
         "set(CMAKE_CXX_STANDARD 11)"
         "set(CMAKE_CXX_STANDARD 17)"
         _jcml "${_jcml}")
+    # jsonnet's test_suite/CMakeLists.txt unconditionally registers a
+    # regression_test via add_test(), even when BUILD_TESTS is OFF.
+    # Guard it so CTest doesn't try to run `../jsonnet` (which doesn't exist).
+    string(REPLACE
+        "add_subdirectory(test_suite)"
+        "if(BUILD_TESTS)\n    add_subdirectory(test_suite)\nendif()"
+        _jcml "${_jcml}")
     if(MSVC)
         # jsonnet v0.20.0 rejects non-GCC/Clang compilers with a FATAL_ERROR in
         # the else() branch of its compiler-flags check (CMakeLists.txt:43).
