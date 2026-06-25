@@ -647,11 +647,14 @@ int run_spratpack(int argc, char** argv) {
         // output flows through std::cout.  In embedded mode std::cout is
         // redirected to a stringstream; writing to the C-level stdout FILE*
         // would bypass that redirection and lose all data.
-        auto tar_write_cb = [](struct archive* /*unused*/, void* /*client_data*/,
+        auto tar_write_cb = [](struct archive* a, void* /*client_data*/,
                                const void* buffer, size_t length) -> la_ssize_t {
             std::cout.write(static_cast<const char*>(buffer),
                             static_cast<std::streamsize>(length));
-            if (std::cout.fail()) return -1;
+            if (std::cout.fail()) {
+                archive_set_error(a, EIO, "std::cout write error");
+                return -1;
+            }
             return static_cast<la_ssize_t>(length);
         };
         if (archive_write_open(a.get(), nullptr, nullptr, tar_write_cb, nullptr) != ARCHIVE_OK) {

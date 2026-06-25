@@ -1085,10 +1085,14 @@ bool extract_tar_from_stdin(const fs::path& output_dir) {
     // Use a read callback so that input flows through std::cin.  In embedded
     // mode std::cin is redirected to a stringstream; reading from the OS-level
     // stdin fd would bypass that redirection and receive no data.
-    auto tar_read_cb = [](struct archive* /*unused*/, void* /*client_data*/,
+    auto tar_read_cb = [](struct archive* a, void* /*client_data*/,
                           const void** buffer) -> la_ssize_t {
         static thread_local std::vector<char> buf(k_tar_read_buffer_size);
         std::cin.read(buf.data(), static_cast<std::streamsize>(buf.size()));
+        if (std::cin.bad() || (std::cin.fail() && !std::cin.eof())) {
+            archive_set_error(a, EIO, "std::cin read error");
+            return -1;
+        }
         auto n = std::cin.gcount();
         *buffer = buf.data();
         return static_cast<la_ssize_t>(n);
