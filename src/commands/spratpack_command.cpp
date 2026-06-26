@@ -49,6 +49,14 @@
 #include <squish.h>
 #endif
 
+#ifdef SPRAT_HAS_WEBP
+#include <webp/encode.h>
+#endif
+
+#ifdef SPRAT_HAS_AVIF
+#include <avif/avif.h>
+#endif
+
 namespace {
 
 constexpr size_t NUM_CHANNELS = 4;
@@ -439,13 +447,98 @@ std::vector<unsigned char> compress_to_dds(
 }
 #endif
 
+#ifdef SPRAT_HAS_WEBP
+std::vector<unsigned char> encode_webp(
+    const unsigned char* rgba_data,
+    int width,
+    int height,
+    int quality
+) {
+    uint8_t* output = nullptr;
+    size_t output_size = 0;
+
+    if (quality >= 100) {
+        output_size = WebPEncodeLosslessRGBA(rgba_data, width, height,
+                                              width * 4, &output);
+    } else {
+        float q = (quality < 0) ? 100.0f : static_cast<float>(quality);
+        output_size = WebPEncodeRGBA(rgba_data, width, height,
+                                      width * 4, q, &output);
+    }
+
+    std::vector<unsigned char> result;
+    if (output_size > 0 && output) {
+        result.assign(output, output + output_size);
+    }
+    WebPFree(output);
+    return result;
+}
+#endif
+
+#ifdef SPRAT_HAS_AVIF
+std::vector<unsigned char> encode_avif(
+    const unsigned char* rgba_data,
+    int width,
+    int height,
+    int quality
+) {
+    std::vector<unsigned char> result;
+
+    avifImage* image = avifImageCreate(width, height, 8, AVIF_PIXEL_FORMAT_YUV444);
+    if (!image) return result;
+
+    image->matrixCoefficients = AVIF_MATRIX_COEFFICIENTS_IDENTITY;
+    image->yuvRange = AVIF_RANGE_FULL;
+
+    avifRGBImage rgb;
+    avifRGBImageSetDefaults(&rgb, image);
+    rgb.format = AVIF_RGB_FORMAT_RGBA;
+    rgb.depth = 8;
+    rgb.pixels = const_cast<uint8_t*>(rgba_data);
+    rgb.rowBytes = static_cast<uint32_t>(width) * 4;
+
+    if (avifImageRGBToYUV(image, &rgb) != AVIF_RESULT_OK) {
+        avifImageDestroy(image);
+        return result;
+    }
+
+    avifEncoder* encoder = avifEncoderCreate();
+    if (!encoder) {
+        avifImageDestroy(image);
+        return result;
+    }
+
+    if (quality >= 100 || quality < 0) {
+        encoder->quality = AVIF_QUALITY_LOSSLESS;
+        encoder->qualityAlpha = AVIF_QUALITY_LOSSLESS;
+    } else {
+        encoder->quality = quality;
+        encoder->qualityAlpha = quality;
+    }
+    encoder->speed = AVIF_SPEED_DEFAULT;
+
+    avifRWData output = AVIF_DATA_EMPTY;
+    avifResult addResult = avifEncoderAddImage(encoder, image, 1, AVIF_ADD_IMAGE_FLAG_SINGLE);
+    if (addResult == AVIF_RESULT_OK) {
+        avifResult finishResult = avifEncoderFinish(encoder, &output);
+        if (finishResult == AVIF_RESULT_OK && output.size > 0) {
+            result.assign(output.data, output.data + output.size);
+        }
+    }
+
+    avifRWDataFree(&output);
+    avifEncoderDestroy(encoder);
+    avifImageDestroy(image);
+    return result;
+}
+#endif
 
 } // namespace
 
 void print_usage() {
     std::cout << tr("Usage: spratpack [OPTIONS]\n")
               << tr("\n")
-              << tr("Read layout text from stdin and write one or more PNG atlases.\n")
+              << tr("Read layout text from stdin and write one or more image atlases.\n")
               << tr("Writes PNG to stdout for single-atlas input; TAR to stdout for multipack input.\n")
               << tr("\n")
               << tr("Options:\n")
@@ -462,6 +555,8 @@ void print_usage() {
               << tr("  --threads N            Number of worker threads\n")
               << tr("  --debug                Enable detailed error reporting and debug visualization\n")
               << tr("  --protect              Protect output with basic obfuscation\n")
+              << tr("  --format FORMAT        Output format: png (default), webp, or avif\n")
+              << tr("  --quality N            Encoding quality 0-100 (100 = lossless, default: lossless)\n")
               << tr("  --zopfli               Optimize output PNG using Zopfli (very slow)\n")
               << tr("  --help, -h             Show this help message\n")
               << tr("  --version, -v          Show version\n");
@@ -486,6 +581,8 @@ int run_spratpack(int argc, char** argv) {
     bool has_dilate_override = false;
     std::string gpu_compress_format;
     bool has_gpu_compress = false;
+    std::string output_format = "png";
+    int quality = -1;  // -1 = default (lossless for webp/avif)
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--help" || arg == "-h") {
@@ -572,11 +669,42 @@ int run_spratpack(int argc, char** argv) {
                 return 1;
             }
             thread_limit = static_cast<unsigned int>(parsed);
+        } else if (arg == "--format" && i + 1 < argc) {
+            output_format = argv[++i];
+            std::transform(output_format.begin(), output_format.end(), output_format.begin(),
+                          [](unsigned char c) { return std::tolower(c); });
+            if (output_format != "png" && output_format != "webp" && output_format != "avif") {
+                std::cerr << tr("Invalid format: ") << output_format << tr(" (must be png, webp, or avif)\n");
+                return 1;
+            }
+        } else if (arg == "--quality" && i + 1 < argc) {
+            std::string value = argv[++i];
+            if (!parse_int(value, quality) || quality < 0 || quality > 100) {
+                std::cerr << tr("Invalid quality value: ") << value << tr(" (must be 0-100)\n");
+                return 1;
+            }
         }
     }
 
     if (debug) {
         draw_frame_lines = true;
+    }
+
+    if (output_format == "webp") {
+#ifndef SPRAT_HAS_WEBP
+        std::cerr << tr("Error: --format webp requires libwebp support (not compiled in)\n");
+        return 1;
+#endif
+    } else if (output_format == "avif") {
+#ifndef SPRAT_HAS_AVIF
+        std::cerr << tr("Error: --format avif requires libavif support (not compiled in)\n");
+        return 1;
+#endif
+    }
+
+    // Default quality: lossless (100) for webp/avif when not specified
+    if (quality < 0 && (output_format == "webp" || output_format == "avif")) {
+        quality = 100;
     }
 
     Layout layout;
@@ -893,7 +1021,7 @@ int run_spratpack(int argc, char** argv) {
         }
 
         std::vector<unsigned char> output_data;
-        std::string output_extension = ".png";
+        std::string output_extension = "." + output_format;
 
 #ifdef SPRAT_HAS_SQUISH
         if (has_gpu_compress) {
@@ -903,6 +1031,24 @@ int run_spratpack(int argc, char** argv) {
                 return 1;
             }
             output_extension = ".dds";
+        } else
+#endif
+#ifdef SPRAT_HAS_WEBP
+        if (output_format == "webp") {
+            output_data = encode_webp(atlas_data.data(), atlas_width, atlas_height, quality);
+            if (output_data.empty()) {
+                std::cerr << tr("Error: Failed to encode WEBP for atlas ") << atlas_idx << "\n";
+                return 1;
+            }
+        } else
+#endif
+#ifdef SPRAT_HAS_AVIF
+        if (output_format == "avif") {
+            output_data = encode_avif(atlas_data.data(), atlas_width, atlas_height, quality);
+            if (output_data.empty()) {
+                std::cerr << tr("Error: Failed to encode AVIF for atlas ") << atlas_idx << "\n";
+                return 1;
+            }
         } else
 #endif
         {

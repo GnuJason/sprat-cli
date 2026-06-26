@@ -246,6 +246,52 @@ if(NOT SQUISH_FOUND)
     endif()
 endif()
 
+# libwebp detection
+if(PkgConfig_FOUND)
+    pkg_check_modules(WEBP libwebp)
+endif()
+
+if(NOT WEBP_FOUND)
+    find_library(WEBP_LIBRARY NAMES webp libwebp)
+    find_path(WEBP_INCLUDE_DIR NAMES webp/encode.h)
+    if(WEBP_LIBRARY AND WEBP_INCLUDE_DIR)
+        set(WEBP_LIBRARIES ${WEBP_LIBRARY})
+        set(WEBP_INCLUDE_DIRS ${WEBP_INCLUDE_DIR})
+        set(WEBP_FOUND TRUE)
+
+        # Attempt to locate webp DLL for copying
+        if(WIN32 AND NOT SPRAT_STATIC)
+            get_filename_component(WEBP_ROOT "${WEBP_INCLUDE_DIR}/.." ABSOLUTE)
+            find_file(WEBP_DLL NAMES webp.dll libwebp.dll
+                      HINTS "${WEBP_ROOT}/bin" "${WEBP_ROOT}" "${WEBP_INCLUDE_DIR}"
+                      DOC "Path to libwebp DLL")
+        endif()
+    endif()
+endif()
+
+# libavif detection
+if(PkgConfig_FOUND)
+    pkg_check_modules(AVIF libavif)
+endif()
+
+if(NOT AVIF_FOUND)
+    find_library(AVIF_LIBRARY NAMES avif libavif)
+    find_path(AVIF_INCLUDE_DIR NAMES avif/avif.h)
+    if(AVIF_LIBRARY AND AVIF_INCLUDE_DIR)
+        set(AVIF_LIBRARIES ${AVIF_LIBRARY})
+        set(AVIF_INCLUDE_DIRS ${AVIF_INCLUDE_DIR})
+        set(AVIF_FOUND TRUE)
+
+        # Attempt to locate avif DLL for copying
+        if(WIN32 AND NOT SPRAT_STATIC)
+            get_filename_component(AVIF_ROOT "${AVIF_INCLUDE_DIR}/.." ABSOLUTE)
+            find_file(AVIF_DLL NAMES avif.dll libavif.dll
+                      HINTS "${AVIF_ROOT}/bin" "${AVIF_ROOT}" "${AVIF_INCLUDE_DIR}"
+                      DOC "Path to libavif DLL")
+        endif()
+    endif()
+endif()
+
 # Jsonnet dependency
 include(FetchContent)
 FetchContent_Declare(
@@ -459,6 +505,16 @@ if(SQUISH_FOUND)
     target_include_directories(spratpack PRIVATE ${SQUISH_INCLUDE_DIRS})
     target_compile_definitions(spratpack PRIVATE SPRAT_HAS_SQUISH)
 endif()
+if(WEBP_FOUND)
+    target_link_libraries(spratpack PRIVATE ${WEBP_LIBRARIES})
+    target_include_directories(spratpack PRIVATE ${WEBP_INCLUDE_DIRS})
+    target_compile_definitions(spratpack PRIVATE SPRAT_HAS_WEBP)
+endif()
+if(AVIF_FOUND)
+    target_link_libraries(spratpack PRIVATE ${AVIF_LIBRARIES})
+    target_include_directories(spratpack PRIVATE ${AVIF_INCLUDE_DIRS})
+    target_compile_definitions(spratpack PRIVATE SPRAT_HAS_AVIF)
+endif()
 target_include_directories(spratpack PRIVATE ${LIBARCHIVE_INCLUDE_DIRS})
 target_include_directories(spratpack SYSTEM PRIVATE ${STB_DIR})
 
@@ -540,6 +596,22 @@ foreach(target spratlayout spratpack spratconvert spratframes spratunpack)
                         "${SQUISH_DLL}"
                         $<TARGET_FILE_DIR:${target}>/
                     COMMENT "Copying squish DLL to $<TARGET_FILE_DIR:${target}>"
+                    VERBATIM)
+            endif()
+            if(WEBP_DLL AND (target STREQUAL "spratpack"))
+                add_custom_command(TARGET ${target} POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${WEBP_DLL}"
+                        $<TARGET_FILE_DIR:${target}>/
+                    COMMENT "Copying webp DLL to $<TARGET_FILE_DIR:${target}>"
+                    VERBATIM)
+            endif()
+            if(AVIF_DLL AND (target STREQUAL "spratpack"))
+                add_custom_command(TARGET ${target} POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${AVIF_DLL}"
+                        $<TARGET_FILE_DIR:${target}>/
+                    COMMENT "Copying avif DLL to $<TARGET_FILE_DIR:${target}>"
                     VERBATIM)
             endif()
         endif()

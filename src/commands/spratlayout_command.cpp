@@ -1539,6 +1539,7 @@ void print_usage() {
               << tr("  --multipack                Split into multiple atlases if they don't fit\n")
               << tr("  --incremental              Reuse positions for unchanged sprites (layout stability)\n")
               << tr("  --deduplicate <mode>       Deduplication mode: none, exact, perceptual\n")
+              << tr("  --dedup-threshold N        Max Hamming distance for perceptual dedup (0-64, default: 5)\n")
               << tr("  --sort name|none|stable[:<metric>]  Order of sprites in layout (default: none)\n")
               << tr("                             stable: deterministic sort by size then path; <metric> is\n")
               << tr("                             area (default), maxside, height, width, or perimeter\n")
@@ -1602,6 +1603,7 @@ std::string build_layout_signature(const std::string& profile_name,
                                    bool allow_rotate,
                                    bool preserve_source_order,
                                    const std::string& deduplicateMode,
+                                   int dedup_threshold,
                                    const std::vector<ImageSource>& sources) {
     const std::vector<std::string> parts = build_source_sig_parts(preserve_source_order, sources);
 
@@ -1632,6 +1634,8 @@ std::string build_layout_signature(const std::string& profile_name,
     sig += (preserve_source_order ? '1' : '0');
     sig += '|';
     sig += deduplicateMode;
+    sig += '|';
+    sig += std::to_string(dedup_threshold);
     for (const std::string& part : parts) {
         sig += '\n';
         sig += part;
@@ -3575,8 +3579,8 @@ bool pack_atlases(
     return true;
 }
 
-// Maximum allowed Hamming distance between two dHashes to consider sprites perceptually equal.
-static constexpr int k_dhash_threshold = 5;
+// Default maximum Hamming distance between two dHashes to consider sprites perceptually equal.
+static constexpr int k_default_dhash_threshold = 5;
 
 // Compute a 64-bit dHash for an RGBA pixel buffer.
 // Algorithm: sample a 9x8 greyscale grid (nearest-neighbor), then for each of the 8 rows
@@ -3655,6 +3659,8 @@ struct LayoutArgs {
     bool has_multipack_override = false;
     std::string deduplicateMode = "none";
     bool has_deduplicate_override = false;
+    int dedup_threshold = k_default_dhash_threshold;
+    bool has_dedup_threshold_override = false;
     FrameSort frame_sort = FrameSort::Name;
     StableMetric stable_metric = StableMetric::Area;
     bool has_frame_sort_override = false;
@@ -3798,6 +3804,13 @@ int try_parse_args(int argc, char** argv, LayoutArgs& args) {
                 return 1;
             }
             args.has_deduplicate_override = true;
+        } else if (arg == "--dedup-threshold" && i + 1 < argc) {
+            const std::string value = argv[++i];
+            if (!parse_non_negative_int(value, args.dedup_threshold) || args.dedup_threshold > 64) {
+                std::cerr << tr("Invalid dedup threshold: ") << value << tr(" (must be 0-64)\n");
+                return 1;
+            }
+            args.has_dedup_threshold_override = true;
         } else if (arg == "--sort" && i + 1 < argc) {
             const std::string value = argv[++i];
             if (!parse_frame_sort_from_string(value, args.frame_sort, args.stable_metric)) {
@@ -3921,6 +3934,7 @@ int run_spratlayout(int argc, char** argv) {
     bool multipack = args.has_multipack_override ? args.multipack : false;
     bool has_multipack_override = args.has_multipack_override;
     const std::string deduplicateMode = std::move(args.deduplicateMode);
+    const int dedup_threshold = args.dedup_threshold;
     const FrameSort frame_sort = args.frame_sort;
     const StableMetric stable_metric = args.stable_metric;
     const bool has_frame_sort_override = args.has_frame_sort_override;
@@ -4403,7 +4417,7 @@ int run_spratlayout(int argc, char** argv) {
     const bool is_file = !do_sort && !enforce_stable_order;
     const std::string layout_signature = build_layout_signature(
         selected_profile_name, mode, optimize_target, max_width_limit, max_height_limit,
-        padding, extrude, scale, trim_transparent, allow_rotate, is_file, deduplicateMode, sources);
+        padding, extrude, scale, trim_transparent, allow_rotate, is_file, deduplicateMode, dedup_threshold, sources);
     const std::string layout_seed_signature = build_layout_seed_signature(
         selected_profile_name, mode, optimize_target, max_width_limit, max_height_limit,
         extrude, scale, trim_transparent, allow_rotate, is_file, sources);
@@ -4740,7 +4754,7 @@ int run_spratlayout(int argc, char** argv) {
             for (size_t j = i + 1; j < N; ++j) {
                 if (phash[j] == 0) continue;
                 if (sprites[i].w != sprites[j].w || sprites[i].h != sprites[j].h) continue;
-                if (popcount64(phash[i] ^ phash[j]) <= k_dhash_threshold) {
+                if (popcount64(phash[i] ^ phash[j]) <= dedup_threshold) {
                     size_t ri = find(i), rj = find(j);
                     if (ri != rj) parent[rj] = ri;
                 }
@@ -5488,6 +5502,7 @@ int run_spratlayout(int argc, char** argv) {
                         allow_rotate,
                         is_file,
                         deduplicateMode,
+                        dedup_threshold,
                         sources
                     );
                     if (prewarm_signature == layout_signature) {
