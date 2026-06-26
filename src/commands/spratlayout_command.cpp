@@ -1240,6 +1240,8 @@ bool detect_and_extract_tar_content(const fs::path& input_path, InputContext& ou
         return true;
     }
 
+    std::cerr << tr("Error: Input path does not exist or is not a file/directory: ")
+              << to_quoted(input_path) << "\n";
     return false;
 }
 
@@ -3838,7 +3840,6 @@ int run_spratlayout(int argc, char** argv) {
         }
     } else {
         if (!detect_and_extract_tar_content(folder, input_context)) {
-            std::cerr << tr("Error: Failed to load content from input\n");
             return 1;
         }
     }

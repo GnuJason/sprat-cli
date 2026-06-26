@@ -4,8 +4,10 @@
 #include <array>
 #include <cctype>
 #include <cmath>
+#include <iostream>
 #include <sstream>
 #include <string_view>
+#include <unordered_set>
 
 // Returns true for line prefixes that appear in the combined raw-layout format
 // produced by spratconvert but carry no meaning for the basic layout parser.
@@ -89,6 +91,14 @@ bool parse_sprite_line(const std::string& line, Sprite& out, std::string& error)
             error = "invalid position or size pair";
             return false;
         }
+        if (parsed.x < 0 || parsed.y < 0) {
+            error = "sprite position must not be negative";
+            return false;
+        }
+        if (parsed.w < 0 || parsed.h < 0) {
+            error = "sprite dimensions must not be negative";
+            return false;
+        }
 
         if (tokens.size() == MODERN_SPRITE_TOKENS_MAX) {
             if (!parse_pair(tokens[2], parsed.src_x, parsed.src_y)
@@ -110,6 +120,14 @@ bool parse_sprite_line(const std::string& line, Sprite& out, std::string& error)
             || !parse_int(tokens[2], parsed.w)
             || !parse_int(tokens[3], parsed.h)) {
             error = "legacy sprite line has invalid numeric fields";
+            return false;
+        }
+        if (parsed.x < 0 || parsed.y < 0) {
+            error = "sprite position must not be negative";
+            return false;
+        }
+        if (parsed.w < 0 || parsed.h < 0) {
+            error = "sprite dimensions must not be negative";
             return false;
         }
         if (tokens.size() == LEGACY_SPRITE_TOKENS_MAX) {
@@ -266,6 +284,7 @@ bool parse_alias_line(const std::string& line, std::string& alias_path, std::str
 bool parse_layout(std::istream& in, Layout& out, std::string& error) {
     Layout parsed;
     std::string line;
+    std::unordered_set<std::string> seen_sprite_paths;
 
     while (std::getline(in, line)) {
         if (line.empty()) {
@@ -276,6 +295,10 @@ bool parse_layout(std::istream& in, Layout& out, std::string& error) {
             int w = 0, h = 0;
             if (!parse_atlas_line(line, w, h)) {
                 error = "Invalid atlas line: " + line;
+                return false;
+            }
+            if (w <= 0 || h <= 0) {
+                error = "Atlas dimensions must be positive: " + line;
                 return false;
             }
             parsed.atlases.push_back({w, h});
@@ -338,6 +361,18 @@ bool parse_layout(std::istream& in, Layout& out, std::string& error) {
                 return false;
             }
             s.atlas_index = static_cast<int>(parsed.atlases.size()) - 1;
+            const auto& atlas = parsed.atlases[static_cast<size_t>(s.atlas_index)];
+            if (s.x + s.w > atlas.width || s.y + s.h > atlas.height) {
+                error = "Sprite " + s.path + " extends beyond atlas bounds ("
+                    + std::to_string(s.x) + "+" + std::to_string(s.w) + "="
+                    + std::to_string(s.x + s.w) + " > " + std::to_string(atlas.width)
+                    + " or " + std::to_string(s.y) + "+" + std::to_string(s.h) + "="
+                    + std::to_string(s.y + s.h) + " > " + std::to_string(atlas.height) + ")";
+                return false;
+            }
+            if (!parsed.multipack && !seen_sprite_paths.insert(s.path).second) {
+                std::cerr << "Warning: duplicate sprite path: " << s.path << "\n";
+            }
             parsed.sprites.push_back(s);
         } else if (line.starts_with("alias")) {
             std::string alias_path, canonical_path;

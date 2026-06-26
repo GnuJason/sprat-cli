@@ -80,11 +80,106 @@ void test_parse_layout() {
     std::cout << "test_parse_layout passed" << std::endl;
 }
 
+void test_parse_layout_rejects_non_positive_atlas_dimensions() {
+    sprat::core::Layout layout;
+    std::string error;
+
+    // Zero dimensions
+    std::istringstream z("atlas 0,0\nsprite \"a.png\" 0,0 0,0\n");
+    assert(!sprat::core::parse_layout(z, layout, error));
+    assert(error.find("Atlas dimensions must be positive") != std::string::npos);
+
+    // Negative width
+    error.clear();
+    std::istringstream nw("atlas -1,100\nsprite \"a.png\" 0,0 1,1\n");
+    assert(!sprat::core::parse_layout(nw, layout, error));
+    assert(error.find("Atlas dimensions must be positive") != std::string::npos);
+
+    // Negative height
+    error.clear();
+    std::istringstream nh("atlas 100,-1\nsprite \"a.png\" 0,0 1,1\n");
+    assert(!sprat::core::parse_layout(nh, layout, error));
+    assert(error.find("Atlas dimensions must be positive") != std::string::npos);
+
+    std::cout << "test_parse_layout_rejects_non_positive_atlas_dimensions passed" << std::endl;
+}
+
+void test_parse_layout_rejects_negative_sprite_dimensions() {
+    sprat::core::Layout layout;
+    std::string error;
+
+    // Modern format: negative width
+    std::istringstream nw("atlas 512,512\nsprite \"a.png\" 0,0 -1,10\n");
+    assert(!sprat::core::parse_layout(nw, layout, error));
+    assert(error.find("sprite dimensions must not be negative") != std::string::npos);
+
+    // Modern format: negative height
+    error.clear();
+    std::istringstream nh("atlas 512,512\nsprite \"a.png\" 0,0 10,-1\n");
+    assert(!sprat::core::parse_layout(nh, layout, error));
+    assert(error.find("sprite dimensions must not be negative") != std::string::npos);
+
+    std::cout << "test_parse_layout_rejects_negative_sprite_dimensions passed" << std::endl;
+}
+
+void test_parse_layout_rejects_sprite_out_of_bounds() {
+    sprat::core::Layout layout;
+    std::string error;
+
+    // Sprite extends beyond right edge
+    std::istringstream r("atlas 512,512\nsprite \"a.png\" 500,0 100,100\n");
+    assert(!sprat::core::parse_layout(r, layout, error));
+    assert(error.find("extends beyond atlas bounds") != std::string::npos);
+
+    // Sprite extends beyond bottom edge
+    error.clear();
+    std::istringstream b("atlas 512,512\nsprite \"a.png\" 0,500 100,100\n");
+    assert(!sprat::core::parse_layout(b, layout, error));
+    assert(error.find("extends beyond atlas bounds") != std::string::npos);
+
+    // Sprite that fits exactly should succeed
+    error.clear();
+    std::istringstream ok("atlas 512,512\nsprite \"a.png\" 412,412 100,100\n");
+    assert(sprat::core::parse_layout(ok, layout, error));
+
+    std::cout << "test_parse_layout_rejects_sprite_out_of_bounds passed" << std::endl;
+}
+
+void test_parse_sprite_line_rejects_negative_position() {
+    sprat::core::Sprite s;
+    std::string error;
+
+    // Modern format: negative x
+    assert(!sprat::core::parse_sprite_line("sprite \"a.png\" -1,0 10,10", s, error));
+    assert(error.find("sprite position must not be negative") != std::string::npos);
+
+    // Modern format: negative y
+    error.clear();
+    assert(!sprat::core::parse_sprite_line("sprite \"a.png\" 0,-1 10,10", s, error));
+    assert(error.find("sprite position must not be negative") != std::string::npos);
+
+    // Legacy format: negative x
+    error.clear();
+    assert(!sprat::core::parse_sprite_line("sprite \"a.png\" -1 0 10 10", s, error));
+    assert(error.find("sprite position must not be negative") != std::string::npos);
+
+    // Legacy format: negative y
+    error.clear();
+    assert(!sprat::core::parse_sprite_line("sprite \"a.png\" 0 -1 10 10", s, error));
+    assert(error.find("sprite position must not be negative") != std::string::npos);
+
+    std::cout << "test_parse_sprite_line_rejects_negative_position passed" << std::endl;
+}
+
 int main() {
     test_parse_atlas_line();
     test_parse_sprite_line();
     test_parse_extrude_line();
     test_parse_layout();
+    test_parse_layout_rejects_non_positive_atlas_dimensions();
+    test_parse_layout_rejects_negative_sprite_dimensions();
+    test_parse_layout_rejects_sprite_out_of_bounds();
+    test_parse_sprite_line_rejects_negative_position();
     std::cout << "All layout tests passed!" << std::endl;
     return 0;
 }

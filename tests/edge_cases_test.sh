@@ -32,4 +32,26 @@ if echo "atlas 1,1" | "$spratconvert_bin" --transform non_existent 2>/dev/null; 
     echo "FAILED: spratconvert should fail with non-existent transform"
 fi
 
+# 4. spratlayout with non-existent directory
+echo "Test 4: spratlayout with non-existent directory"
+output=$("$spratlayout_bin" /nonexistent/path/that/does/not/exist 2>&1 || true)
+if echo "$output" | grep -qi "does not exist"; then
+    echo "  PASS: got 'does not exist' error message"
+else
+    echo "  FAILED: expected 'does not exist' in error, got: $output"
+    exit 1
+fi
+
+# 5. spratlayout with empty directory (no images)
+echo "Test 5: spratlayout with empty directory"
+empty_dir="$tmp_dir/empty_input"
+mkdir -p "$empty_dir"
+output=$("$spratlayout_bin" "$empty_dir" 2>&1 || true)
+if echo "$output" | grep -qi "no valid images"; then
+    echo "  PASS: got 'no valid images' error message"
+else
+    echo "  FAILED: expected 'no valid images' in error, got: $output"
+    exit 1
+fi
+
 echo "edge_cases_test.sh: ok"

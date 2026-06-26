@@ -746,6 +746,12 @@ int run_spratpack(int argc, char** argv) {
                 return false;
             }
 
+            if (s.x < 0 || s.y < 0 || s.x + s.w > atlas_width || s.y + s.h > atlas_height) {
+                error_out = "Error: Sprite " + to_quoted(s.path)
+                    + " placement out of atlas bounds";
+                return false;
+            }
+
             // Unrotated destination dimensions (rotation swaps w/h in the atlas slot)
             const int dest_w = s.rotated ? s.h : s.w;
             const int dest_h = s.rotated ? s.w : s.h;
