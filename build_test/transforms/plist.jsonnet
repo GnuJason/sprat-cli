@@ -35,6 +35,12 @@ local sprite_entry(s) =
   '\t\t\t<string>' + plist_source_color_rect + '</string>\n' +
   '\t\t\t<key>sourceSize</key>\n' +
   '\t\t\t<string>' + plist_source_size + '</string>\n' +
+  (if s.has_slice then
+    '\t\t\t<key>capInsets</key>\n' +
+    '\t\t\t<string>{{' + s.slice_left + ',' + s.slice_top + '},{' +
+    (source_w - s.slice_left - s.slice_right) + ',' +
+    (source_h - s.slice_top - s.slice_bottom) + '}}</string>\n'
+  else "") +
   '\t\t</dict>\n';
 
 local plist_atlas_size = "{" + sprat.atlas_width + "," + sprat.atlas_height + "}";
@@ -43,6 +49,7 @@ local plist_atlas_size = "{" + sprat.atlas_width + "," + sprat.atlas_height + "}
   name: "plist",
   description: "Cocos2d-x TextureAtlas plist format (format 2)",
   extension: ".plist",
+  icon: "icons/plist.svg",
   content:
     '<?xml version="1.0" encoding="UTF-8"?>\n' +
     '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n' +

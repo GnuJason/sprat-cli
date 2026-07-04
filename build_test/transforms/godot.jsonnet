@@ -9,7 +9,16 @@ local frame_obj(s) = {
   source_size: { w: s.source_w, h: s.source_h },
   rotated: s.rotated,
   pivot_offset: { x: s.pivot_x_norm, y: s.pivot_y_norm_raw },
-};
+} + (if s.has_slice then {
+  slice: {
+    left: s.slice_left,
+    top: s.slice_top,
+    right: s.slice_right,
+    bottom: s.slice_bottom,
+    h_mode: s.slice_h,
+    v_mode: s.slice_v,
+  },
+} else {});
 
 // Godot animations use from/to indices (first and last frame index).
 local anim_obj(a) = {
@@ -35,5 +44,6 @@ local result =
   name: "Godot",
   description: "Godot-compatible JSON sprite sheet (load at runtime with AtlasTexture/SpriteFrames)",
   extension: ".json",
+  icon: "icons/godot-svgrepo-com(1).svg",
   content: std.manifestJsonEx(result, " ") + "\n",
 }

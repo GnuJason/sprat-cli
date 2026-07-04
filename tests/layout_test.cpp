@@ -241,6 +241,21 @@ void test_parse_sprite_line_slice_fill_modes() {
     assert(!sprat::core::parse_sprite_line("sprite \"a.png\" 0,0 64,64 slice=8,8,8,8,invalid,stretch", s, error));
     assert(error.find("invalid slice value") != std::string::npos);
 
+    // Fixed mode on both axes
+    assert(sprat::core::parse_sprite_line("sprite \"a.png\" 0,0 64,64 slice=8,8,8,8,fixed,fixed", s, error));
+    assert(s.has_slice);
+    assert(s.slice_h == "fixed");
+    assert(s.slice_v == "fixed");
+
+    // Fixed on one axis, stretch on the other
+    assert(sprat::core::parse_sprite_line("sprite \"a.png\" 0,0 64,64 slice=8,8,8,8,fixed,stretch", s, error));
+    assert(s.slice_h == "fixed");
+    assert(s.slice_v == "stretch");
+
+    assert(sprat::core::parse_sprite_line("sprite \"a.png\" 0,0 64,64 slice=8,8,8,8,repeat,fixed", s, error));
+    assert(s.slice_h == "repeat");
+    assert(s.slice_v == "fixed");
+
     // Only one mode provided (5 values) — should fail
     error.clear();
     assert(!sprat::core::parse_sprite_line("sprite \"a.png\" 0,0 64,64 slice=8,8,8,8,repeat", s, error));

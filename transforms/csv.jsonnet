@@ -26,9 +26,10 @@ local marker_json(m) =
 local markers_json_array(markers) =
   "[" + std.join(",", [marker_json(m) for m in markers]) + "]";
 
-local header = "index,name,path,atlas_index,atlas_path,x,y,w,h,pivot_x,pivot_y,trim_left,trim_top,trim_right,trim_bottom,marker_count,markers_json,rotation\n";
+local header = "index,name,path,atlas_index,atlas_path,x,y,w,h,pivot_x,pivot_y,trim_left,trim_top,trim_right,trim_bottom,marker_count,markers_json,rotation,has_slice,slice_left,slice_top,slice_right,slice_bottom,slice_h,slice_v\n";
 
 local sprite_row(s) =
+  local has_slice = s.has_slice;
   "" + s.index + "," +
   csv_escape(s.name) + "," +
   csv_escape(s.path) + "," +
@@ -39,7 +40,14 @@ local sprite_row(s) =
   s.trim_left + "," + s.trim_top + "," + s.trim_right + "," + s.trim_bottom + "," +
   std.length(s.markers) + "," +
   markers_json_array(s.markers) + "," +
-  (if s.rotated then "90" else "0") + "\n";
+  (if s.rotated then "90" else "0") + "," +
+  (if has_slice then "true" else "false") + "," +
+  (if has_slice then "" + s.slice_left else "") + "," +
+  (if has_slice then "" + s.slice_top else "") + "," +
+  (if has_slice then "" + s.slice_right else "") + "," +
+  (if has_slice then "" + s.slice_bottom else "") + "," +
+  (if has_slice then s.slice_h else "") + "," +
+  (if has_slice then s.slice_v else "") + "\n";
 
 local marker_row(m) =
   "marker," + m.index + "," +

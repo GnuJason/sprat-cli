@@ -8,7 +8,10 @@ local sprite_entry(s) =
   "  size: " + s.w + ", " + s.h + "\n" +
   "  orig: " + s.source_w + ", " + s.source_h + "\n" +
   "  offset: " + s.trim_left + ", " + s.trim_bottom + "\n" +
-  "  index: -1\n";
+  "  index: -1\n" +
+  (if s.has_slice then
+    "  split: " + s.slice_left + ", " + s.slice_right + ", " + s.slice_top + ", " + s.slice_bottom + "\n"
+  else "");
 
 local atlas_block(at) =
   at.path + "\n" +
@@ -22,5 +25,6 @@ local atlas_block(at) =
   name: "LibGDX",
   description: "LibGDX TextureAtlas format (.atlas); animation data is not part of this format",
   extension: ".atlas",
+  icon: "icons/libgdx.svg",
   content: std.join("", [atlas_block(at) for at in sprat.atlases]),
 }

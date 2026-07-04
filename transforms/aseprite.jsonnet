@@ -2,6 +2,21 @@
 local sprat = std.extVar("sprat");
 local lib = import "sprat.libsonnet";
 
+local slice_obj(s) = {
+  name: s.name,
+  color: "#0000ffff",
+  keys: [{
+    frame: s.index,
+    bounds: { x: 0, y: 0, w: s.source_w, h: s.source_h },
+    center: {
+      x: s.slice_left,
+      y: s.slice_top,
+      w: s.source_w - s.slice_left - s.slice_right,
+      h: s.source_h - s.slice_top - s.slice_bottom,
+    },
+  }],
+};
+
 local frame_obj(s) = {
   filename: s.name,
   frame: { x: s.x, y: s.y, w: s.w, h: s.h },
@@ -33,7 +48,7 @@ local result = {
     scale: "" + sprat.scale,
     frameTags: frame_tags,
     layers: [],
-    slices: [],
+    slices: [slice_obj(s) for s in sprat.sprites if s.has_slice],
   },
 };
 

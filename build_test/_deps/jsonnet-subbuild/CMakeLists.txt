@@ -1,7 +1,7 @@
 # Distributed under the OSI-approved BSD 3-Clause License.  See accompanying
 # file LICENSE.rst or https://cmake.org/licensing for details.
 
-cmake_minimum_required(VERSION 4.3.2)
+cmake_minimum_required(VERSION 4.3.4)
 
 # Reject any attempt to use a toolchain file. We must not use one because
 # we could be downloading it here. If the CMAKE_TOOLCHAIN_FILE environment
@@ -27,7 +27,7 @@ set_property(GLOBAL PROPERTY _CMAKE_FindGit_GIT_EXECUTABLE_VERSION
 
 include(ExternalProject)
 ExternalProject_Add(jsonnet-populate
-                     "UPDATE_DISCONNECTED" "False" "GIT_REPOSITORY" "https://github.com/google/jsonnet.git" "EXTERNALPROJECT_INTERNAL_ARGUMENT_SEPARATOR" "GIT_TAG" "f45e01d632b29e4c0757ec7ba188ce759298e6d3"
+                     "UPDATE_DISCONNECTED" "False" "GIT_REPOSITORY" "https://github.com/google/jsonnet.git" "EXTERNALPROJECT_INTERNAL_ARGUMENT_SEPARATOR" "GIT_TAG" "f45e01d632b29e4c0757ec7ba188ce759298e6d3" "GIT_SUBMODULES" ""
                     SOURCE_DIR          "/home/pedroac/Projects/sprat-cli/build_test/_deps/jsonnet-src"
                     BINARY_DIR          "/home/pedroac/Projects/sprat-cli/build_test/_deps/jsonnet-build"
                     CONFIGURE_COMMAND   ""

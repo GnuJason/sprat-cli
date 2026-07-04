@@ -55,8 +55,8 @@ grep -q '"path": "./frames/b.png"' "$tmp_dir/out.json"
 grep -q '"atlas_index": 0' "$tmp_dir/out.json"
 
 "$convert_bin" --transform csv < "$layout_file" > "$tmp_dir/out.csv"
-grep -q '^index,name,path,atlas_index,atlas_path,x,y,w,h,pivot_x,pivot_y,trim_left,trim_top,trim_right,trim_bottom,marker_count,markers_json,rotation$' "$tmp_dir/out.csv"
-grep -q '^1,b,./frames/b.png,0,,16,0,8,8,0,0,1,2,3,4,0,\[\],90$' "$tmp_dir/out.csv"
+grep -q '^index,name,path,atlas_index,atlas_path,x,y,w,h,pivot_x,pivot_y,trim_left,trim_top,trim_right,trim_bottom,marker_count,markers_json,rotation,has_slice,slice_left,slice_top,slice_right,slice_bottom,slice_h,slice_v$' "$tmp_dir/out.csv"
+grep -q '^1,b,./frames/b.png,0,,16,0,8,8,0,0,1,2,3,4,0,\[\],90,false,,,,,,$' "$tmp_dir/out.csv"
 
 "$convert_bin" --transform xml < "$layout_file" > "$tmp_dir/out.xml"
 grep -q '<layout multipack="false" scale="1" extrude="0">$' "$tmp_dir/out.xml"
@@ -475,5 +475,139 @@ single_out="$tmp_dir/single_out"
 "$convert_bin" --transform tstsuite.json --output-dir "$(fix_path "$single_out")" < "$layout_file"
 test -f "$single_out/json.json"
 grep -q '"stem":"json"' "$single_out/json.json"
+
+# ── Nine-slice transform output ───────────────────────────────────────────────
+sliced_layout="$tmp_dir/sliced.txt"
+cat > "$sliced_layout" <<'SLICEDLAYOUT'
+atlas 64,64
+scale 1
+sprite "panel.png" 0,0 32,32 slice=8,8,8,8
+sprite "border.png" 32,0 16,16 slice=4,4,4,4,repeat,stretch
+sprite "plain.png" 0,32 16,16
+SLICEDLAYOUT
+
+# JSON: has_slice flag and slice fields
+"$convert_bin" --transform json < "$sliced_layout" > "$tmp_dir/out.sliced.json"
+grep -q '"has_slice": true' "$tmp_dir/out.sliced.json"
+grep -q '"has_slice": false' "$tmp_dir/out.sliced.json"
+grep -q '"slice"' "$tmp_dir/out.sliced.json"
+grep -q '"h_mode": "stretch"' "$tmp_dir/out.sliced.json"
+grep -q '"h_mode": "repeat"' "$tmp_dir/out.sliced.json"
+if command -v python3 >/dev/null 2>&1; then
+  python3 -c "
+import json, sys
+d = json.load(open(sys.argv[1]))
+panel = next(s for s in d['sprites'] if s['name'] == 'panel')
+assert panel['has_slice'] == True
+assert panel['slice']['left'] == 8 and panel['slice']['top'] == 8
+assert panel['slice']['right'] == 8 and panel['slice']['bottom'] == 8
+assert panel['slice']['h_mode'] == 'stretch' and panel['slice']['v_mode'] == 'stretch'
+plain = next(s for s in d['sprites'] if s['name'] == 'plain')
+assert plain['has_slice'] == False
+assert 'slice' not in plain
+" "$(fix_path "$tmp_dir/out.sliced.json")"
+fi
+
+# XML: slice attributes present on sliced sprites
+"$convert_bin" --transform xml < "$sliced_layout" > "$tmp_dir/out.sliced.xml"
+grep -q 'slice_left="8"' "$tmp_dir/out.sliced.xml"
+grep -q 'slice_h="stretch"' "$tmp_dir/out.sliced.xml"
+grep -q 'slice_h="repeat"' "$tmp_dir/out.sliced.xml"
+if grep -q 'slice_left' "$tmp_dir/out.sliced.xml"; then
+  # plain sprite line must not contain slice attributes
+  if grep 'name="plain"' "$tmp_dir/out.sliced.xml" | grep -q 'slice_left'; then
+    echo "plain sprite should not have slice_left in XML" >&2
+    exit 1
+  fi
+fi
+
+# CSV: has_slice column values
+"$convert_bin" --transform csv < "$sliced_layout" > "$tmp_dir/out.sliced.csv"
+grep -q ',true,8,8,8,8,stretch,stretch$' "$tmp_dir/out.sliced.csv"
+grep -q ',true,4,4,4,4,repeat,stretch$' "$tmp_dir/out.sliced.csv"
+grep -q ',false,,,,,,$' "$tmp_dir/out.sliced.csv"
+
+# unity.json: border field present for sliced sprites
+"$convert_bin" --transform unity.json < "$sliced_layout" > "$tmp_dir/out.sliced.unity.json"
+grep -q '"border"' "$tmp_dir/out.sliced.unity.json"
+grep -q '"l": 8' "$tmp_dir/out.sliced.unity.json"
+
+# unity.meta: per-sprite border YAML line
+"$convert_bin" --transform unity.meta < "$sliced_layout" > "$tmp_dir/out.sliced.meta"
+grep -q 'border: {x: 8, y: 8, z: 8, w: 8}' "$tmp_dir/out.sliced.meta"
+grep -q 'border: {x: 0, y: 0, z: 0, w: 0}' "$tmp_dir/out.sliced.meta"
+
+# libgdx: split line present for sliced sprites
+"$convert_bin" --transform libgdx < "$sliced_layout" > "$tmp_dir/out.sliced.atlas"
+grep -q 'split: 8, 8, 8, 8' "$tmp_dir/out.sliced.atlas"
+if grep -A6 '^plain$' "$tmp_dir/out.sliced.atlas" | grep -q 'split'; then
+  echo "plain sprite should not have split in libgdx output" >&2
+  exit 1
+fi
+
+# phaser-hash: border field present for sliced sprites
+"$convert_bin" --transform phaser-hash < "$sliced_layout" > "$tmp_dir/out.sliced.phaser.json"
+grep -q '"border"' "$tmp_dir/out.sliced.phaser.json"
+grep -q '"l": 8' "$tmp_dir/out.sliced.phaser.json"
+
+# aseprite: slices[] populated from sliced sprites
+"$convert_bin" --transform aseprite < "$sliced_layout" > "$tmp_dir/out.sliced.aseprite.json"
+if command -v python3 >/dev/null 2>&1; then
+  python3 -c "
+import json, sys
+d = json.load(open(sys.argv[1]))
+slices = d['meta']['slices']
+assert len(slices) == 2, 'expected 2 slices, got ' + str(len(slices))
+panel_sl = next(sl for sl in slices if sl['name'] == 'panel')
+assert panel_sl['keys'][0]['frame'] == 0, 'panel slice frame mismatch'
+assert panel_sl['keys'][0]['center']['x'] == 8
+assert panel_sl['keys'][0]['center']['y'] == 8
+assert panel_sl['keys'][0]['center']['w'] == 16  # 32 - 8 - 8
+assert panel_sl['keys'][0]['center']['h'] == 16
+plain_names = [sl['name'] for sl in slices]
+assert 'plain' not in plain_names, 'plain sprite should not appear in slices'
+" "$(fix_path "$tmp_dir/out.sliced.aseprite.json")"
+fi
+
+# godot: slice object present for sliced sprites, absent for plain
+"$convert_bin" --transform godot < "$sliced_layout" > "$tmp_dir/out.sliced.godot.json"
+grep -q '"slice"' "$tmp_dir/out.sliced.godot.json"
+if command -v python3 >/dev/null 2>&1; then
+  python3 -c "
+import json, sys
+d = json.load(open(sys.argv[1]))
+panel = next(f for f in d['frames'] if f['name'] == 'panel')
+assert panel['slice']['left'] == 8 and panel['slice']['top'] == 8
+assert panel['slice']['h_mode'] == 'stretch'
+plain = next(f for f in d['frames'] if f['name'] == 'plain')
+assert 'slice' not in plain, 'plain sprite should not have slice'
+" "$(fix_path "$tmp_dir/out.sliced.godot.json")"
+fi
+
+# plist: capInsets present for sliced sprites, absent for plain
+"$convert_bin" --transform plist < "$sliced_layout" > "$tmp_dir/out.sliced.plist"
+grep -q '<key>capInsets</key>' "$tmp_dir/out.sliced.plist"
+grep -q '{{8,8},{16,16}}' "$tmp_dir/out.sliced.plist"
+if grep -A8 '<key>plain</key>' "$tmp_dir/out.sliced.plist" | grep -q 'capInsets'; then
+  echo "plain sprite should not have capInsets in plist" >&2
+  exit 1
+fi
+
+# Nine-patch sprite naming: "button.9.png" should produce name "button", not "button.9"
+nine_patch_layout="$tmp_dir/ninepatch_name.txt"
+cat > "$nine_patch_layout" <<'LAYOUT'
+atlas 32,32
+scale 1
+sprite "button.9.png" 0,0 30,30 slice=4,4,4,4
+LAYOUT
+"$convert_bin" --transform json < "$nine_patch_layout" > "$tmp_dir/ninepatch_name.json"
+if command -v python3 >/dev/null 2>&1; then
+  python3 -c "
+import json, sys
+d = json.load(open(sys.argv[1]))
+name = d['sprites'][0]['name']
+assert name == 'button', 'expected name \"button\", got \"' + name + '\"'
+" "$(fix_path "$tmp_dir/ninepatch_name.json")"
+fi
 
 echo "convert_test.sh: ok"

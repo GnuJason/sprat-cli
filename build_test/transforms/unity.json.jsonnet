@@ -8,7 +8,9 @@ local frame_obj(s) = {
   spriteSourceSize: { x: s.trim_left, y: s.trim_top, w: s.content_w, h: s.content_h },
   sourceSize: { w: s.source_w, h: s.source_h },
   pivot: { x: s.pivot_x_norm, y: s.pivot_y_norm },
-};
+} + (if s.has_slice then {
+  border: { l: s.slice_left, t: s.slice_top, r: s.slice_right, b: s.slice_bottom },
+} else {});
 
 local frames_obj = std.foldl(
   function(acc, s) acc { [s.name]: frame_obj(s) },
@@ -32,5 +34,6 @@ local result = {
   name: "Unity JSON",
   description: "Unity-compatible JSON sprite sheet (TexturePacker JSON Hash format with normalized pivots)",
   extension: ".json",
+  icon: "icons/unity-svgrepo-com.svg",
   content: std.manifestJsonEx(result, "  ") + "\n",
 }

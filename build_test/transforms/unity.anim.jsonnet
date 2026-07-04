@@ -64,6 +64,7 @@ local render_clip(anim) =
   name: "Unity AnimationClip",
   description: "Unity AnimationClip (.anim) sprite animation; GUIDs match the unity.meta transform output; use --output-dir to write one .anim file per animation",
   extension: ".anim",
+  icon: "icons/unity-svgrepo-com.svg",
   files: [
     { filename: anim.name + ".anim", content: render_clip(anim) }
     for anim in sprat.animations

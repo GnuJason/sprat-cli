@@ -153,6 +153,13 @@ std::string format_double(double value) {
 std::string sprite_name_from_path(const std::string& path) {
     fs::path p(path);
     std::string name = p.stem().string();
+    // Strip the ".9" from Android nine-patch stems ("button.9" → "button").
+    constexpr std::string_view np_suffix = ".9.png";
+    if (name.size() >= 2 && name.compare(name.size() - 2, 2, ".9") == 0 &&
+        path.size() >= np_suffix.size() &&
+        path.compare(path.size() - np_suffix.size(), np_suffix.size(), np_suffix) == 0) {
+        name.resize(name.size() - 2);
+    }
     if (!name.empty()) {
         return name;
     }
@@ -743,6 +750,7 @@ std::string build_sprat_json(
         o += ",\"trim_bottom\":" + std::to_string(s.trim_bottom);
         o += ",\"has_trim\":" + std::string(has_trim ? "true" : "false");
         o += ",\"rotated\":" + std::string(s.rotated ? "true" : "false");
+        o += ",\"has_slice\":" + std::string(s.has_slice ? "true" : "false");
         if (s.has_slice) {
             o += ",\"slice_left\":" + std::to_string(s.slice_left);
             o += ",\"slice_top\":" + std::to_string(s.slice_top);

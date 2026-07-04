@@ -32,12 +32,19 @@ local sprite_xml(s) =
       std.join("\n    ", [marker_xml(m) for m in s.markers]) +
       "\n  </markers>\n"
     else "";
+  local slice_attrs =
+    if s.has_slice then
+      ' slice_left="' + s.slice_left + '" slice_top="' + s.slice_top +
+      '" slice_right="' + s.slice_right + '" slice_bottom="' + s.slice_bottom +
+      '" slice_h="' + s.slice_h + '" slice_v="' + s.slice_v + '"'
+    else "";
   '<sprite index="' + s.index + '" name="' + xml_escape(s.name) + '" path="' + xml_escape(s.path) +
   '" x="' + s.x + '" y="' + s.y + '" w="' + s.w + '" h="' + s.h +
   '" pivot_x="' + s.pivot_x + '" pivot_y="' + s.pivot_y +
   '" trim_left="' + s.trim_left + '" trim_top="' + s.trim_top +
   '" trim_right="' + s.trim_right + '" trim_bottom="' + s.trim_bottom +
-  '" marker_count="' + std.length(s.markers) + '" rotation="' + (if s.rotated then "90" else "0") + '">' +
+  '" marker_count="' + std.length(s.markers) + '" rotation="' + (if s.rotated then "90" else "0") + '"' +
+  slice_attrs + '>' +
   marker_section + "</sprite>";
 
 local atlas_xml(at) =

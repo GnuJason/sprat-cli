@@ -10,7 +10,17 @@ local sprite_obj(s) = {
   trim: { left: s.trim_left, top: s.trim_top, right: s.trim_right, bottom: s.trim_bottom },
   markers: s.markers,
   rotation: if s.rotated then 90 else 0,
-};
+  has_slice: s.has_slice,
+} + (if s.has_slice then {
+  slice: {
+    left: s.slice_left,
+    top: s.slice_top,
+    right: s.slice_right,
+    bottom: s.slice_bottom,
+    h_mode: s.slice_h,
+    v_mode: s.slice_v,
+  },
+} else {});
 
 local anim_obj(a) =
   if a.is_alias then
@@ -36,5 +46,6 @@ local result = {
   name: "JSON",
   description: "JSON metadata for scripting and runtime loading",
   extension: ".json",
+  icon: "icons/json-svgrepo-com.svg",
   content: std.manifestJsonEx(result, "  ") + "\n",
 }

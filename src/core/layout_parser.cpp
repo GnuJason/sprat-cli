@@ -48,8 +48,8 @@ static bool parse_slice(const std::string& val, int& left, int& top, int& right,
     h_mode = val.substr(p4 + 1, p5 - p4 - 1);
     v_mode = val.substr(p5 + 1);
 
-    if (h_mode != "stretch" && h_mode != "repeat" && h_mode != "mirror") return false;
-    if (v_mode != "stretch" && v_mode != "repeat" && v_mode != "mirror") return false;
+    if (h_mode != "stretch" && h_mode != "repeat" && h_mode != "mirror" && h_mode != "fixed") return false;
+    if (v_mode != "stretch" && v_mode != "repeat" && v_mode != "mirror" && v_mode != "fixed") return false;
 
     return true;
 }
@@ -119,7 +119,7 @@ bool parse_sprite_line(const std::string& line, Sprite& out, std::string& error)
             if (!parse_slice(val, parsed.slice_left, parsed.slice_top,
                              parsed.slice_right, parsed.slice_bottom,
                              parsed.slice_h, parsed.slice_v)) {
-                error = "invalid slice value (expected L,T,R,B[,H_MODE,V_MODE] with non-negative integers and optional stretch/repeat/mirror modes): " + val;
+                error = "invalid slice value (expected L,T,R,B[,H_MODE,V_MODE] with non-negative integers and optional stretch/repeat/mirror/fixed modes): " + val;
                 return false;
             }
             parsed.has_slice = true;

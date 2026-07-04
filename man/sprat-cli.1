@@ -92,8 +92,13 @@ If rotation is used for a sprite, the sprite line includes the \fBrotated\fR tok
 The optional \fBslice=\fR token defines nine-slice insets and per-axis fill modes.
 The format is \fBslice=L,T,R,B[,H_MODE,V_MODE]\fR where \fBL\fR, \fBT\fR, \fBR\fR, \fBB\fR are
 non-negative integer insets and \fBH_MODE\fR/\fBV_MODE\fR are optional fill modes for the
-horizontal and vertical stretchable regions (\fBstretch\fR, \fBrepeat\fR, or \fBmirror\fR;
+horizontal and vertical stretchable regions (\fBstretch\fR, \fBrepeat\fR, \fBmirror\fR, or \fBfixed\fR;
 default: \fBstretch\fR).
+.PP
+Android nine-patch images (\fB*.9.png\fR) are detected automatically: the 1-pixel marker
+border is stripped and the stretch region is read from the opaque black pixels on the top
+row and left column.  A \fBslice=\fR token is emitted in the output layout without any manual
+annotation.
 .PP
 Input modes:
 .IP "\(bu" 2

@@ -35,6 +35,12 @@ local sprite_entry(s) =
   '\t\t\t<string>' + plist_source_color_rect + '</string>\n' +
   '\t\t\t<key>sourceSize</key>\n' +
   '\t\t\t<string>' + plist_source_size + '</string>\n' +
+  (if s.has_slice then
+    '\t\t\t<key>capInsets</key>\n' +
+    '\t\t\t<string>{{' + s.slice_left + ',' + s.slice_top + '},{' +
+    (source_w - s.slice_left - s.slice_right) + ',' +
+    (source_h - s.slice_top - s.slice_bottom) + '}}</string>\n'
+  else "") +
   '\t\t</dict>\n';
 
 local plist_atlas_size = "{" + sprat.atlas_width + "," + sprat.atlas_height + "}";

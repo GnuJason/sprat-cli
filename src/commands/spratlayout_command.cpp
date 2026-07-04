@@ -65,8 +65,8 @@ namespace fs = std::filesystem;
 
 #include <stb_image.h>
 
-constexpr int k_output_cache_format_version = 3;
-constexpr int k_seed_cache_format_version = 3;
+constexpr int k_output_cache_format_version = 4;
+constexpr int k_seed_cache_format_version = 4;
 #ifndef SPRAT_GLOBAL_PROFILE_CONFIG
 #define SPRAT_GLOBAL_PROFILE_CONFIG "/usr/local/share/sprat/spratprofiles.cfg"
 #endif
@@ -686,6 +686,8 @@ struct Sprite {
     int trim_right = 0, trim_bottom = 0;
     bool rotated = false;
     int atlas_index = 0;
+    bool has_slice = false;
+    int slice_left = 0, slice_top = 0, slice_right = 0, slice_bottom = 0;
 };
 
 struct Atlas {
@@ -717,6 +719,8 @@ struct ImageCacheEntry {
     long long cached_at_unix = 0;
     uint64_t content_hash = 0;     // FNV-1a hash of visible pixel region (0 = not computed)
     uint64_t perceptual_hash = 0;  // dHash of visible pixel region   (0 = not computed)
+    bool has_slice = false;
+    int slice_left = 0, slice_top = 0, slice_right = 0, slice_bottom = 0;
 };
 
 struct LayoutCandidate {
@@ -1319,7 +1323,7 @@ bool load_image_cache(const fs::path& cache_path,
     if (!(in >> header_tag >> version)) {
         return false;
     }
-    if (header_tag != "spratlayout_cache" || (version != 1 && version != 2 && version != 3)) {
+    if (header_tag != "spratlayout_cache" || (version != 1 && version != 2 && version != 3 && version != 4)) {
         return false;
     }
 
@@ -1349,6 +1353,13 @@ bool load_image_cache(const fs::path& cache_path,
             if (!(in >> entry.content_hash >> entry.perceptual_hash)) {
                 break;
             }
+        }
+        if (version >= 4) {
+            int slice_flag = 0;
+            if (!(in >> slice_flag >> entry.slice_left >> entry.slice_top >> entry.slice_right >> entry.slice_bottom)) {
+                break;
+            }
+            entry.has_slice = slice_flag != 0;
         }
         if (entry.w <= 0 || entry.h <= 0 || entry.w > k_max_image_dimension || entry.h > k_max_image_dimension) {
             continue;
@@ -1391,7 +1402,7 @@ bool save_image_cache(const fs::path& cache_path,
         valid.resize(k_max_cache_entries);
     }
 
-    out << "spratlayout_cache 3\n";
+    out << "spratlayout_cache 4\n";
     for (const auto& [key_ptr, e_ptr] : valid) {
         std::string path = *key_ptr;
         if (path.size() > 2 &&
@@ -1412,7 +1423,12 @@ bool save_image_cache(const fs::path& cache_path,
             << e.trim_bottom << " "
             << e.cached_at_unix << " "
             << e.content_hash << " "
-            << e.perceptual_hash << "\n";
+            << e.perceptual_hash << " "
+            << (e.has_slice ? 1 : 0) << " "
+            << e.slice_left << " "
+            << e.slice_top << " "
+            << e.slice_right << " "
+            << e.slice_bottom << "\n";
     }
     out.close();
     if (!out) {
@@ -2213,12 +2229,16 @@ std::string build_layout_output_text(const std::vector<Atlas>& atlases,
             output << "sprite " << to_quoted(path) << " "
                    << s.x << "," << s.y << " "
                    << s.w << "," << s.h;
-            if (trim_transparent) {
+            if (s.trim_left || s.trim_top || s.trim_right || s.trim_bottom) {
                 output << " " << s.trim_left << "," << s.trim_top
                        << " " << s.trim_right << "," << s.trim_bottom;
             }
             if (s.rotated) {
                 output << " rotated";
+            }
+            if (s.has_slice) {
+                output << " slice=" << s.slice_left << "," << s.slice_top
+                       << "," << s.slice_right << "," << s.slice_bottom;
             }
             output << "\n";
         }
@@ -4444,6 +4464,46 @@ int run_spratlayout(int argc, char** argv) {
         }
     }
 
+    // Returns true if path ends with ".9.png" (case-sensitive).
+    auto is_nine_patch_path = [](const std::string& p) -> bool {
+        constexpr std::string_view suffix = ".9.png";
+        return p.size() >= suffix.size() &&
+               p.compare(p.size() - suffix.size(), suffix.size(), suffix) == 0;
+    };
+
+    // Parses Android nine-patch markers from the 1px opaque border of a full image.
+    // rgba  : RGBA pixel data for the full fw x fh image (including the 1px border).
+    // On success, fills sl/st/sr/sb with content-space insets and returns true.
+    auto parse_nine_patch = [](const unsigned char* rgba, int fw, int fh,
+                                int& sl, int& st, int& sr, int& sb) -> bool {
+        if (fw < 3 || fh < 3) return false;
+        auto is_black = [&](int col, int row) -> bool {
+            const unsigned char* p =
+                rgba + (static_cast<size_t>(row) * static_cast<size_t>(fw) + static_cast<size_t>(col)) * 4;
+            return p[0] == 0 && p[1] == 0 && p[2] == 0 && p[3] == 255;
+        };
+        int first_col = -1, last_col = -1;
+        for (int c = 1; c < fw - 1; ++c) {
+            if (is_black(c, 0)) {
+                if (first_col < 0) first_col = c;
+                last_col = c;
+            }
+        }
+        int first_row = -1, last_row = -1;
+        for (int r = 1; r < fh - 1; ++r) {
+            if (is_black(0, r)) {
+                if (first_row < 0) first_row = r;
+                last_row = r;
+            }
+        }
+        if (first_col < 0 || first_row < 0) return false;
+        sl = first_col - 1;
+        sr = (fw - 2) - last_col;
+        st = first_row - 1;
+        sb = (fh - 2) - last_row;
+        return true;
+    };
+
     std::unordered_map<std::string, ImageCacheEntry> cache_entries;
     load_image_cache(cache_path, cache_entries);
     prune_stale_cache_entries(cache_entries, now_unix, k_cache_max_age_seconds);
@@ -4494,6 +4554,11 @@ int run_spratlayout(int argc, char** argv) {
                     s.trim_top = cached.trim_top;
                     s.trim_right = cached.trim_right;
                     s.trim_bottom = cached.trim_bottom;
+                    s.has_slice = cached.has_slice;
+                    s.slice_left = cached.slice_left;
+                    s.slice_top = cached.slice_top;
+                    s.slice_right = cached.slice_right;
+                    s.slice_bottom = cached.slice_bottom;
                     result.ok = true;
                     result.from_cache = true;
                     result.sprite = std::move(s);
@@ -4505,12 +4570,13 @@ int run_spratlayout(int argc, char** argv) {
         Sprite loaded_sprite;
         loaded_sprite.path = path;
         if (!trim_transparent) {
-            // Step 4b: when deduplication is active, load pixel data to compute hashes.
+            // Step 4b: load pixel data if needed for hashing or nine-patch parsing.
+            const bool is_nine_patch = is_nine_patch_path(path);
             uint64_t entry_content_hash = 0;
             uint64_t entry_perceptual_hash = 0;
             int w = 0;
             int h = 0;
-            if (deduplicateMode != "none") {
+            if (deduplicateMode != "none" || is_nine_patch) {
                 int channels = 0;
                 unsigned char* px = stbi_load(path.c_str(), &w, &h, &channels, 4);
                 if (px == nullptr) {
@@ -4518,15 +4584,63 @@ int run_spratlayout(int argc, char** argv) {
                     result.fail_reason = stbi_failure_reason();
                     return;
                 }
-                // FNV-1a over the full RGBA buffer
-                const size_t nbytes = static_cast<size_t>(w) * static_cast<size_t>(h) * 4;
-                uint64_t fnv = 14695981039346656037ULL;
-                for (size_t bi = 0; bi < nbytes; ++bi) {
-                    fnv ^= px[bi];
-                    fnv *= 1099511628211ULL;
+                if (is_nine_patch && w >= 3 && h >= 3) {
+                    int sl = 0, st_v = 0, sr = 0, sb = 0;
+                    if (parse_nine_patch(px, w, h, sl, st_v, sr, sb)) {
+                        loaded_sprite.has_slice = true;
+                        loaded_sprite.slice_left = sl;
+                        loaded_sprite.slice_top = st_v;
+                        loaded_sprite.slice_right = sr;
+                        loaded_sprite.slice_bottom = sb;
+                    }
+                    // Content dimensions exclude the 1px marker border on each side.
+                    w -= 2;
+                    h -= 2;
+                    // Trim of (1,1,1,1) tells spratpack to skip the border row/column
+                    // when blitting pixels from the source file into the atlas.
+                    loaded_sprite.trim_left = 1;
+                    loaded_sprite.trim_top = 1;
+                    loaded_sprite.trim_right = 1;
+                    loaded_sprite.trim_bottom = 1;
                 }
-                entry_content_hash = fnv;
-                entry_perceptual_hash = compute_dhash(px, w, h);
+                if (deduplicateMode != "none") {
+                    if (is_nine_patch) {
+                        // Hash the inner content region (skip the 1px nine-patch border).
+                        const int fw = w + 2;
+                        uint64_t fnv = 14695981039346656037ULL;
+                        for (int ry = 1; ry <= h; ++ry) {
+                            const unsigned char* row =
+                                px + (static_cast<size_t>(ry) * static_cast<size_t>(fw) + 1) * 4;
+                            for (int rx = 0; rx < w; ++rx) {
+                                for (int c = 0; c < 4; ++c) {
+                                    fnv ^= row[static_cast<size_t>(rx) * 4 + static_cast<size_t>(c)];
+                                    fnv *= 1099511628211ULL;
+                                }
+                            }
+                        }
+                        entry_content_hash = fnv;
+                        std::vector<unsigned char> inner(
+                            static_cast<size_t>(w) * static_cast<size_t>(h) * 4);
+                        for (int ry = 0; ry < h; ++ry) {
+                            const unsigned char* src =
+                                px + (static_cast<size_t>(1 + ry) * static_cast<size_t>(fw) + 1) * 4;
+                            unsigned char* dst = inner.data() +
+                                static_cast<size_t>(ry) * static_cast<size_t>(w) * 4;
+                            std::memcpy(dst, src, static_cast<size_t>(w) * 4);
+                        }
+                        entry_perceptual_hash = compute_dhash(inner.data(), w, h);
+                    } else {
+                        // FNV-1a over the full RGBA buffer
+                        const size_t nbytes = static_cast<size_t>(w) * static_cast<size_t>(h) * 4;
+                        uint64_t fnv = 14695981039346656037ULL;
+                        for (size_t bi = 0; bi < nbytes; ++bi) {
+                            fnv ^= px[bi];
+                            fnv *= 1099511628211ULL;
+                        }
+                        entry_content_hash = fnv;
+                        entry_perceptual_hash = compute_dhash(px, w, h);
+                    }
+                }
                 stbi_image_free(px);
             } else {
                 int channels = 0;
@@ -4552,7 +4666,12 @@ int run_spratlayout(int argc, char** argv) {
                 .trim_bottom=loaded_sprite.trim_bottom,
                 .cached_at_unix=now_unix,
                 .content_hash=entry_content_hash,
-                .perceptual_hash=entry_perceptual_hash
+                .perceptual_hash=entry_perceptual_hash,
+                .has_slice=loaded_sprite.has_slice,
+                .slice_left=loaded_sprite.slice_left,
+                .slice_top=loaded_sprite.slice_top,
+                .slice_right=loaded_sprite.slice_right,
+                .slice_bottom=loaded_sprite.slice_bottom
             };
             return;
         }
@@ -4567,6 +4686,35 @@ int run_spratlayout(int argc, char** argv) {
             return;
         }
 
+        // For nine-patch images, parse the marker border and work on the inner content.
+        const bool is_nine_patch = is_nine_patch_path(path);
+        std::vector<unsigned char> nine_patch_inner;
+        const unsigned char* content_data = data;
+        int content_w = w;
+        int content_h = h;
+        if (is_nine_patch && w >= 3 && h >= 3) {
+            int sl = 0, st_v = 0, sr = 0, sb = 0;
+            if (parse_nine_patch(data, w, h, sl, st_v, sr, sb)) {
+                loaded_sprite.has_slice = true;
+                loaded_sprite.slice_left = sl;
+                loaded_sprite.slice_top = st_v;
+                loaded_sprite.slice_right = sr;
+                loaded_sprite.slice_bottom = sb;
+            }
+            content_w = w - 2;
+            content_h = h - 2;
+            nine_patch_inner.resize(
+                static_cast<size_t>(content_w) * static_cast<size_t>(content_h) * 4);
+            for (int ry = 0; ry < content_h; ++ry) {
+                const unsigned char* src =
+                    data + (static_cast<size_t>(1 + ry) * static_cast<size_t>(w) + 1) * 4;
+                unsigned char* dst =
+                    nine_patch_inner.data() + static_cast<size_t>(ry) * static_cast<size_t>(content_w) * 4;
+                std::memcpy(dst, src, static_cast<size_t>(content_w) * 4);
+            }
+            content_data = nine_patch_inner.data();
+        }
+
         int min_x = 0;
         int min_y = 0;
         int max_x = -1;
@@ -4574,11 +4722,14 @@ int run_spratlayout(int argc, char** argv) {
         // Step 4c: compute hashes over trimmed region before freeing pixel data.
         uint64_t entry_content_hash = 0;
         uint64_t entry_perceptual_hash = 0;
-        if (compute_trim_bounds(data, w, h, min_x, min_y, max_x, max_y)) {
-            loaded_sprite.trim_left = min_x;
-            loaded_sprite.trim_top = min_y;
-            loaded_sprite.trim_right = (w - 1) - max_x;
-            loaded_sprite.trim_bottom = (h - 1) - max_y;
+        // For nine-patch files, all trim values are offset by 1 to account for the
+        // 1px marker border that exists in the source file but not in the content buffer.
+        const int np_border = (is_nine_patch && w >= 3 && h >= 3) ? 1 : 0;
+        if (compute_trim_bounds(content_data, content_w, content_h, min_x, min_y, max_x, max_y)) {
+            loaded_sprite.trim_left = np_border + min_x;
+            loaded_sprite.trim_top = np_border + min_y;
+            loaded_sprite.trim_right = np_border + (content_w - 1) - max_x;
+            loaded_sprite.trim_bottom = np_border + (content_h - 1) - max_y;
             loaded_sprite.w = max_x - min_x + 1;
             loaded_sprite.h = max_y - min_y + 1;
 
@@ -4586,7 +4737,9 @@ int run_spratlayout(int argc, char** argv) {
                 // FNV-1a over the trimmed pixel region
                 uint64_t fnv = 14695981039346656037ULL;
                 for (int ry = min_y; ry <= max_y; ++ry) {
-                    const unsigned char* row = data + (static_cast<size_t>(ry) * static_cast<size_t>(w) + static_cast<size_t>(min_x)) * 4;
+                    const unsigned char* row = content_data +
+                        (static_cast<size_t>(ry) * static_cast<size_t>(content_w) +
+                         static_cast<size_t>(min_x)) * 4;
                     for (int rx = 0; rx < (max_x - min_x + 1); ++rx) {
                         for (int c = 0; c < 4; ++c) {
                             fnv ^= row[static_cast<size_t>(rx) * 4 + static_cast<size_t>(c)];
@@ -4599,20 +4752,24 @@ int run_spratlayout(int argc, char** argv) {
                 // Extract trimmed region for dHash
                 const int tw = max_x - min_x + 1;
                 const int th = max_y - min_y + 1;
-                std::vector<unsigned char> trimmed(static_cast<size_t>(tw) * static_cast<size_t>(th) * 4);
+                std::vector<unsigned char> trimmed(
+                    static_cast<size_t>(tw) * static_cast<size_t>(th) * 4);
                 for (int ry = 0; ry < th; ++ry) {
-                    const unsigned char* src = data + (static_cast<size_t>(min_y + ry) * static_cast<size_t>(w) + static_cast<size_t>(min_x)) * 4;
-                    unsigned char* dst = trimmed.data() + static_cast<size_t>(ry) * static_cast<size_t>(tw) * 4;
+                    const unsigned char* src = content_data +
+                        (static_cast<size_t>(min_y + ry) * static_cast<size_t>(content_w) +
+                         static_cast<size_t>(min_x)) * 4;
+                    unsigned char* dst = trimmed.data() +
+                        static_cast<size_t>(ry) * static_cast<size_t>(tw) * 4;
                     std::memcpy(dst, src, static_cast<size_t>(tw) * 4);
                 }
                 entry_perceptual_hash = compute_dhash(trimmed.data(), tw, th);
             }
         } else {
             // Fully transparent image: keep a 1x1 transparent region.
-            loaded_sprite.trim_left = 0;
-            loaded_sprite.trim_top = 0;
-            loaded_sprite.trim_right = std::max(0, w - 1);
-            loaded_sprite.trim_bottom = std::max(0, h - 1);
+            loaded_sprite.trim_left = np_border;
+            loaded_sprite.trim_top = np_border;
+            loaded_sprite.trim_right = np_border + std::max(0, content_w - 1);
+            loaded_sprite.trim_bottom = np_border + std::max(0, content_h - 1);
             loaded_sprite.w = 1;
             loaded_sprite.h = 1;
 
@@ -4638,7 +4795,12 @@ int run_spratlayout(int argc, char** argv) {
             .trim_bottom=loaded_sprite.trim_bottom,
             .cached_at_unix=now_unix,
             .content_hash=entry_content_hash,
-            .perceptual_hash=entry_perceptual_hash
+            .perceptual_hash=entry_perceptual_hash,
+            .has_slice=loaded_sprite.has_slice,
+            .slice_left=loaded_sprite.slice_left,
+            .slice_top=loaded_sprite.slice_top,
+            .slice_right=loaded_sprite.slice_right,
+            .slice_bottom=loaded_sprite.slice_bottom
         };
     };
 

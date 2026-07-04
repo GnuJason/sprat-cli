@@ -18,7 +18,10 @@ local sprite_rect_entry(s) =
   "        height: " + s.content_h + "\n" +
   "      alignment: 9\n" +
   "      pivot: {x: " + lib.format_double(s.pivot_x_norm) + ", y: " + lib.format_double(s.pivot_y_norm) + "}\n" +
-  "      border: {x: 0, y: 0, z: 0, w: 0}\n" +
+  "      border: {x: " + (if s.has_slice then s.slice_left else 0) +
+  ", y: " + (if s.has_slice then s.slice_bottom else 0) +
+  ", z: " + (if s.has_slice then s.slice_right else 0) +
+  ", w: " + (if s.has_slice then s.slice_top else 0) + "}\n" +
   "      outline: []\n" +
   "      physicsShape: []\n" +
   "      tessellationDetail: 0\n" +

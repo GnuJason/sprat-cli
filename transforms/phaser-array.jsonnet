@@ -9,7 +9,9 @@ local frame_obj(s) = {
   spriteSourceSize: { x: s.trim_left, y: s.trim_top, w: s.content_w, h: s.content_h },
   sourceSize: { w: s.source_w, h: s.source_h },
   pivot: { x: s.pivot_x_norm, y: s.pivot_y_norm_raw },
-};
+} + (if s.has_slice then {
+  border: { l: s.slice_left, t: s.slice_top, r: s.slice_right, b: s.slice_bottom },
+} else {});
 
 local result = {
   frames: [frame_obj(s) for s in sprat.sprites],
