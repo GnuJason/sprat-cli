@@ -12,6 +12,7 @@ namespace spratgen {
 struct Keyframe {
     PoseSkeleton pose;
     float t = 0.0f;
+    std::string curve;
 };
 
 struct AnimationTemplate {

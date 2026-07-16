@@ -110,8 +110,8 @@ void PoseModel::loadDefaults() {
     templates.emplace(
         "idle",
         make_template("idle", 25, true, {
-            Keyframe{neutral_pose(), 0.0f},
-            Keyframe{idleBreathe, 1.0f},
+            Keyframe{neutral_pose(), 0.0f, "easeInOut"},
+            Keyframe{idleBreathe, 1.0f, "easeInOut"},
         }));
 
     PoseSkeleton walkA = neutral_pose();
@@ -128,10 +128,10 @@ void PoseModel::loadDefaults() {
     templates.emplace(
         "walk",
         make_template("walk", 25, true, {
-            Keyframe{walkA, 0.0f},
-            Keyframe{walkB, 0.33f},
-            Keyframe{mirror_pose(walkA), 0.66f},
-            Keyframe{mirror_pose(walkB), 1.0f},
+            Keyframe{walkA, 0.0f, "linear"},
+            Keyframe{walkB, 0.33f, "linear"},
+            Keyframe{mirror_pose(walkA), 0.66f, "linear"},
+            Keyframe{mirror_pose(walkB), 1.0f, "linear"},
         }));
 
     PoseSkeleton jabStrike = neutral_pose();
@@ -141,9 +141,9 @@ void PoseModel::loadDefaults() {
     templates.emplace(
         "jab",
         make_template("jab", 25, false, {
-            Keyframe{neutral_pose(), 0.0f},
-            Keyframe{jabStrike, 0.4f},
-            Keyframe{neutral_pose(), 1.0f},
+            Keyframe{neutral_pose(), 0.0f, "easeOut"},
+            Keyframe{jabStrike, 0.4f, "easeOut"},
+            Keyframe{neutral_pose(), 1.0f, "easeOut"},
         }));
 
     PoseSkeleton hookStrike = neutral_pose();
@@ -153,9 +153,9 @@ void PoseModel::loadDefaults() {
     templates.emplace(
         "hook",
         make_template("hook", 25, false, {
-            Keyframe{neutral_pose(), 0.0f},
-            Keyframe{hookStrike, 0.5f},
-            Keyframe{neutral_pose(), 1.0f},
+            Keyframe{neutral_pose(), 0.0f, "cubic"},
+            Keyframe{hookStrike, 0.5f, "cubic"},
+            Keyframe{neutral_pose(), 1.0f, "cubic"},
         }));
 
     PoseSkeleton uppercutStrike = neutral_pose();
@@ -165,9 +165,9 @@ void PoseModel::loadDefaults() {
     templates.emplace(
         "uppercut",
         make_template("uppercut", 25, false, {
-            Keyframe{neutral_pose(), 0.0f},
-            Keyframe{uppercutStrike, 0.5f},
-            Keyframe{neutral_pose(), 1.0f},
+            Keyframe{neutral_pose(), 0.0f, "easeOut"},
+            Keyframe{uppercutStrike, 0.5f, "easeOut"},
+            Keyframe{neutral_pose(), 1.0f, "easeOut"},
         }));
 
     PoseSkeleton hitReact = neutral_pose();
@@ -178,8 +178,8 @@ void PoseModel::loadDefaults() {
     templates.emplace(
         "hit",
         make_template("hit", 15, false, {
-            Keyframe{neutral_pose(), 0.0f},
-            Keyframe{hitReact, 1.0f},
+            Keyframe{neutral_pose(), 0.0f, "easeIn"},
+            Keyframe{hitReact, 1.0f, "easeIn"},
         }));
 
     PoseSkeleton blockGuard = neutral_pose();
@@ -188,8 +188,8 @@ void PoseModel::loadDefaults() {
     templates.emplace(
         "block",
         make_template("block", 25, true, {
-            Keyframe{neutral_pose(), 0.0f},
-            Keyframe{blockGuard, 1.0f},
+            Keyframe{neutral_pose(), 0.0f, "linear"},
+            Keyframe{blockGuard, 1.0f, "linear"},
         }));
 
     PoseSkeleton knockdownMid = neutral_pose();
@@ -204,9 +204,9 @@ void PoseModel::loadDefaults() {
     templates.emplace(
         "knockdown",
         make_template("knockdown", 25, false, {
-            Keyframe{neutral_pose(), 0.0f},
-            Keyframe{knockdownMid, 0.5f},
-            Keyframe{knockdownEnd, 1.0f},
+            Keyframe{neutral_pose(), 0.0f, "easeIn"},
+            Keyframe{knockdownMid, 0.5f, "easeIn"},
+            Keyframe{knockdownEnd, 1.0f, "easeIn"},
         }));
 
     PoseSkeleton koPose = knockdownEnd;
@@ -217,8 +217,8 @@ void PoseModel::loadDefaults() {
     templates.emplace(
         "ko",
         make_template("ko", 25, false, {
-            Keyframe{knockdownEnd, 0.0f},
-            Keyframe{koPose, 1.0f},
+            Keyframe{knockdownEnd, 0.0f, "linear"},
+            Keyframe{koPose, 1.0f, "linear"},
         }));
 }
 

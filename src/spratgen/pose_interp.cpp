@@ -1,6 +1,7 @@
 #include "pose_interp.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 namespace spratgen {
 
@@ -15,6 +16,30 @@ PoseSkeleton PoseInterpolator::apply(const Skeleton& base, const Skeleton& targe
     posed.left_leg = lerpJoint(base.left_leg, target.left_leg, clampedT);
     posed.right_leg = lerpJoint(base.right_leg, target.right_leg, clampedT);
     return posed;
+}
+
+float PoseInterpolator::applyCurve(float t, const std::string& curve) {
+    const float clampedT = std::clamp(t, 0.0f, 1.0f);
+
+    if (curve == "easeIn") {
+        return clampedT * clampedT;
+    }
+
+    if (curve == "easeOut") {
+        return 1.0f - (1.0f - clampedT) * (1.0f - clampedT);
+    }
+
+    if (curve == "easeInOut") {
+        return clampedT < 0.5f
+            ? 2.0f * clampedT * clampedT
+            : 1.0f - static_cast<float>(std::pow(-2.0f * clampedT + 2.0f, 2.0f)) / 2.0f;
+    }
+
+    if (curve == "cubic") {
+        return clampedT * clampedT * (3.0f - 2.0f * clampedT);
+    }
+
+    return clampedT;
 }
 
 PoseJoint PoseInterpolator::lerpJoint(const Joint& a, const Joint& b, float t) {

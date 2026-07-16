@@ -5,7 +5,6 @@
 #include <stb_image.h>
 
 #include <algorithm>
-#include <cmath>
 #include <cstddef>
 #include <filesystem>
 #include <iomanip>
@@ -67,44 +66,6 @@ Skeleton apply_pose_offset(const Skeleton& skeleton, const PoseSkeleton& offset)
         target.right_leg,
     };
     return target;
-}
-
-float ease_in(float t) {
-    return t * t;
-}
-
-float ease_out(float t) {
-    const float inverse = 1.0f - t;
-    return 1.0f - inverse * inverse;
-}
-
-float ease_in_out(float t) {
-    if (t < 0.5f) {
-        return 2.0f * t * t;
-    }
-
-    const float inverse = -2.0f * t + 2.0f;
-    return 1.0f - (inverse * inverse) / 2.0f;
-}
-
-float ease_cubic(float t) {
-    return t * t * t;
-}
-
-float apply_animation_easing(const std::string& animationName, float t) {
-    if (animationName == "idle") {
-        return ease_in_out(t);
-    }
-    if (animationName == "jab" || animationName == "uppercut") {
-        return ease_out(t);
-    }
-    if (animationName == "hook") {
-        return ease_cubic(t);
-    }
-    if (animationName == "hit" || animationName == "knockdown") {
-        return ease_in(t);
-    }
-    return t;
 }
 
 struct KeyframeSpan {
@@ -227,16 +188,17 @@ std::vector<RenderedFrame> Generator::generateFrames() {
     std::filesystem::create_directories(outputDir);
 
     for (std::size_t frameIndex = 0; frameIndex < totalFrames; ++frameIndex) {
-        const float t = totalFrames > 1
+        const float rawT = totalFrames > 1
             ? static_cast<float>(frameIndex) / static_cast<float>(totalFrames - 1)
             : 0.0f;
-        const KeyframeSpan span = resolve_keyframe_span(animationTemplate, t);
+        const KeyframeSpan span = resolve_keyframe_span(animationTemplate, rawT);
         const Skeleton baseSkeleton = apply_pose_offset(inferredSkeleton, span.from.pose);
         const Skeleton targetSkeleton = apply_pose_offset(inferredSkeleton, span.to.pose);
+        const float curvedT = poseInterp_.applyCurve(span.localT, span.to.curve);
         const PoseSkeleton posed = poseInterp_.apply(
             baseSkeleton,
             targetSkeleton,
-            apply_animation_easing(animationTemplate.name, span.localT));
+            curvedT);
         RenderedFrame frame = renderer_.renderFrame(silhouette_, posed, palette);
         std::ostringstream fileName;
         fileName << outputDir << "/" << animName_ << "_frame_" << std::setw(3) << std::setfill('0') << frameIndex << ".png";

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 #include "skeleton.hpp"
 
 namespace spratgen {
@@ -21,6 +23,7 @@ struct PoseSkeleton {
 class PoseInterpolator {
 public:
     PoseSkeleton apply(const Skeleton& base, const Skeleton& target, float t);
+    float applyCurve(float t, const std::string& curve);
 
 private:
     PoseJoint lerpJoint(const Joint& a, const Joint& b, float t);

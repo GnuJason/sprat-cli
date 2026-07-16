@@ -1,9 +1,12 @@
 #include "export.hpp"
 
+#include "pose_model.hpp"
+
 #include <stb_image_write.h>
 
-#include <iomanip>
+#include <algorithm>
 #include <fstream>
+#include <iomanip>
 #include <sstream>
 
 namespace spratgen {
@@ -45,6 +48,24 @@ bool FrameExporter::finalizeMetadata(
     output << "  \"frameCount\": " << frameCount << ",\n";
     output << "  \"width\": " << width << ",\n";
     output << "  \"height\": " << height << ",\n";
+    output << "  \"keyframes\": [";
+    const PoseModel poseModel;
+    const auto animationNames = poseModel.getAnimationNames();
+    if (std::find(animationNames.begin(), animationNames.end(), animationName) != animationNames.end()) {
+        const auto& animationTemplate = poseModel.getTemplate(animationName);
+        for (std::size_t keyframeIndex = 0; keyframeIndex < animationTemplate.keyframes.size(); ++keyframeIndex) {
+            if (keyframeIndex > 0) {
+                output << ", ";
+            }
+
+            const auto& keyframe = animationTemplate.keyframes[keyframeIndex];
+            output << "{"
+                   << "\"t\": " << keyframe.t << ", "
+                   << "\"curve\": \"" << keyframe.curve << "\""
+                   << "}";
+        }
+    }
+    output << "],\n";
     output << "  \"framePaths\": [";
     for (int frameIndex = 0; frameIndex < frameCount; ++frameIndex) {
         if (frameIndex > 0) {
