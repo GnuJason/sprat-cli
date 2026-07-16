@@ -54,7 +54,8 @@ Skeleton Generator::buildSkeleton(const Image& image) {
     if (silhouette_.mask.empty() || silhouette_.width != image.width || silhouette_.height != image.height) {
         silhouette_ = silhouetteExtractor_.extract(image);
     }
-    return skeletonBuilder_.build(silhouette_);
+    skeleton_ = skeletonBuilder_.build(silhouette_);
+    return skeleton_;
 }
 
 PoseModel Generator::setupPoseModel(const std::string& animType, std::size_t frameCount) const {
@@ -85,6 +86,10 @@ std::vector<Image> Generator::generateFrames(const std::string& animType, std::s
 
 const Silhouette& Generator::silhouette() const {
     return silhouette_;
+}
+
+const Skeleton& Generator::skeleton() const {
+    return skeleton_;
 }
 
 }  // namespace spratgen

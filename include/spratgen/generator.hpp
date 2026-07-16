@@ -25,10 +25,12 @@ public:
     PoseModel setupPoseModel(const std::string& animType, std::size_t frameCount) const;
     std::vector<Image> generateFrames(const std::string& animType, std::size_t frameCount);
     const Silhouette& silhouette() const;
+    const Skeleton& skeleton() const;
 
 private:
     Config config_;
     Silhouette silhouette_;
+    Skeleton skeleton_;
     PaletteManager paletteManager_;
     SilhouetteExtractor silhouetteExtractor_;
     SkeletonBuilder skeletonBuilder_;
