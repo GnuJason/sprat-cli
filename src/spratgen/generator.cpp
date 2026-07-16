@@ -1,9 +1,12 @@
 #include "generator.hpp"
 
+#include "pose_model.hpp"
+
 #include <stb_image.h>
 
-#include <cstddef>
 #include <algorithm>
+#include <cmath>
+#include <cstddef>
 #include <iomanip>
 #include <sstream>
 #include <utility>
@@ -40,20 +43,20 @@ Skeleton make_render_skeleton(const PoseSkeleton& posed) {
     return skeleton;
 }
 
-Skeleton make_offset_skeleton(const Skeleton& skeleton, int delta) {
+Skeleton apply_pose_offset(const Skeleton& skeleton, const PoseSkeleton& offset) {
     Skeleton target = skeleton;
-    target.head.x += delta;
-    target.head.y += delta;
-    target.torso.x += delta;
-    target.torso.y += delta;
-    target.left_arm.x += delta;
-    target.left_arm.y += delta;
-    target.right_arm.x += delta;
-    target.right_arm.y += delta;
-    target.left_leg.x += delta;
-    target.left_leg.y += delta;
-    target.right_leg.x += delta;
-    target.right_leg.y += delta;
+    target.head.x += offset.head.x;
+    target.head.y += offset.head.y;
+    target.torso.x += offset.torso.x;
+    target.torso.y += offset.torso.y;
+    target.left_arm.x += offset.left_arm.x;
+    target.left_arm.y += offset.left_arm.y;
+    target.right_arm.x += offset.right_arm.x;
+    target.right_arm.y += offset.right_arm.y;
+    target.left_leg.x += offset.left_leg.x;
+    target.left_leg.y += offset.left_leg.y;
+    target.right_leg.x += offset.right_leg.x;
+    target.right_leg.y += offset.right_leg.y;
     target.joints = {
         target.head,
         target.torso,
@@ -63,6 +66,73 @@ Skeleton make_offset_skeleton(const Skeleton& skeleton, int delta) {
         target.right_leg,
     };
     return target;
+}
+
+float ease_in(float t) {
+    return t * t;
+}
+
+float ease_out(float t) {
+    const float inverse = 1.0f - t;
+    return 1.0f - inverse * inverse;
+}
+
+float ease_in_out(float t) {
+    if (t < 0.5f) {
+        return 2.0f * t * t;
+    }
+
+    const float inverse = -2.0f * t + 2.0f;
+    return 1.0f - (inverse * inverse) / 2.0f;
+}
+
+float ease_cubic(float t) {
+    return t * t * t;
+}
+
+float apply_animation_easing(const std::string& animationName, float t) {
+    if (animationName == "idle") {
+        return ease_in_out(t);
+    }
+    if (animationName == "jab" || animationName == "uppercut") {
+        return ease_out(t);
+    }
+    if (animationName == "hook") {
+        return ease_cubic(t);
+    }
+    if (animationName == "hit" || animationName == "knockdown") {
+        return ease_in(t);
+    }
+    return t;
+}
+
+struct KeyframeSpan {
+    Keyframe from;
+    Keyframe to;
+    float localT = 0.0f;
+};
+
+KeyframeSpan resolve_keyframe_span(const AnimationTemplate& animationTemplate, float t) {
+    if (animationTemplate.keyframes.empty()) {
+        return {};
+    }
+
+    const float clampedT = std::clamp(t, 0.0f, 1.0f);
+    if (animationTemplate.keyframes.size() == 1) {
+        return KeyframeSpan{animationTemplate.keyframes.front(), animationTemplate.keyframes.front(), 0.0f};
+    }
+
+    for (std::size_t index = 0; index + 1 < animationTemplate.keyframes.size(); ++index) {
+        const Keyframe& current = animationTemplate.keyframes[index];
+        const Keyframe& next = animationTemplate.keyframes[index + 1];
+        if (clampedT <= next.t) {
+            const float span = next.t - current.t;
+            const float localT = span > 0.0f ? (clampedT - current.t) / span : 0.0f;
+            return KeyframeSpan{current, next, std::clamp(localT, 0.0f, 1.0f)};
+        }
+    }
+
+    return KeyframeSpan{animationTemplate.keyframes.back(), animationTemplate.keyframes.back(), 0.0f};
 }
 
 }  // namespace
@@ -123,7 +193,7 @@ Skeleton Generator::buildSkeleton(const Image& image) {
     return skeleton_;
 }
 
-PoseModel Generator::setupPoseModel(const std::string& animType, std::size_t frameCount) {
+void Generator::setupPoseModel() {
     if (!has_named_pose(skeleton_)) {
         Image image;
         image.width = silhouette_.width;
@@ -132,33 +202,33 @@ PoseModel Generator::setupPoseModel(const std::string& animType, std::size_t fra
             buildSkeleton(image);
         }
     }
-    return PoseModel(animType, frameCount);
+
+    poseModel_.loadDefaults();
 }
 
-std::vector<RenderedFrame> Generator::generateFrames(const std::string& animType, std::size_t frameCount) {
+std::vector<RenderedFrame> Generator::generateFrames(const std::string& animType, std::size_t /*frameCount*/) {
     const Image masterFrame = loadMasterFrame();
     const Palette palette = setupPalette(masterFrame);
     const Skeleton inferredSkeleton = buildSkeleton(masterFrame);
-    const PoseModel poseModel = setupPoseModel(animType, frameCount);
-    Skeleton baseSkeleton = poseModel.getKeyframe(0);
-    Skeleton targetSkeleton = poseModel.getKeyframe(1);
-
-    if (!has_named_pose(baseSkeleton)) {
-        baseSkeleton = inferredSkeleton;
-    }
-    if (!has_named_pose(targetSkeleton)) {
-        targetSkeleton = make_offset_skeleton(inferredSkeleton, 10);
-    }
+    setupPoseModel();
+    const AnimationTemplate& animationTemplate = poseModel_.getTemplate(animType);
+    const std::size_t totalFrames = static_cast<std::size_t>(poseModel_.getFrameCount(animType));
 
     std::vector<RenderedFrame> frames;
-    frames.reserve(frameCount);
+    frames.reserve(totalFrames);
     const std::string outputDir = ".";
 
-    for (std::size_t frameIndex = 0; frameIndex < frameCount; ++frameIndex) {
-        const float t = frameCount > 1
-            ? static_cast<float>(frameIndex) / static_cast<float>(frameCount - 1)
+    for (std::size_t frameIndex = 0; frameIndex < totalFrames; ++frameIndex) {
+        const float t = totalFrames > 1
+            ? static_cast<float>(frameIndex) / static_cast<float>(totalFrames - 1)
             : 0.0f;
-        const PoseSkeleton posed = poseInterp_.apply(baseSkeleton, targetSkeleton, t);
+        const KeyframeSpan span = resolve_keyframe_span(animationTemplate, t);
+        const Skeleton baseSkeleton = apply_pose_offset(inferredSkeleton, span.from.pose);
+        const Skeleton targetSkeleton = apply_pose_offset(inferredSkeleton, span.to.pose);
+        const PoseSkeleton posed = poseInterp_.apply(
+            baseSkeleton,
+            targetSkeleton,
+            apply_animation_easing(animationTemplate.name, span.localT));
         RenderedFrame frame = renderer_.renderFrame(silhouette_, posed, palette);
         std::ostringstream fileName;
         fileName << outputDir << "/frame_" << std::setw(3) << std::setfill('0') << frameIndex << ".png";
@@ -168,7 +238,7 @@ std::vector<RenderedFrame> Generator::generateFrames(const std::string& animType
 
     static_cast<void>(exporter_.finalizeMetadata(
         outputDir,
-        static_cast<int>(frameCount),
+        static_cast<int>(totalFrames),
         silhouette_.width,
         silhouette_.height));
     return frames;

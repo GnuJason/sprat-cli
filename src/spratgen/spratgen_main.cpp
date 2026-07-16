@@ -2,6 +2,7 @@
 
 #include "export.hpp"
 
+#include "pose_model.hpp"
 #include "pose_interp.hpp"
 #include "renderer.hpp"
 
@@ -59,6 +60,19 @@ int main(int argc, char** argv) {
     std::cout << "Interp right arm: " << posed.right_arm.x << ',' << posed.right_arm.y << '\n';
     std::cout << "Interp left leg: " << posed.left_leg.x << ',' << posed.left_leg.y << '\n';
     std::cout << "Interp right leg: " << posed.right_leg.x << ',' << posed.right_leg.y << '\n';
+
+    spratgen::PoseModel poseModel;
+    const std::vector<std::string> animationNames = poseModel.getAnimationNames();
+    std::cout << "PoseModel animations:";
+    for (const std::string& animationName : animationNames) {
+        std::cout << ' ' << animationName;
+    }
+    std::cout << '\n';
+    std::cout << "Jab frames: " << poseModel.getFrameCount("jab") << '\n';
+    const spratgen::PoseSkeleton hookKeyframe = poseModel.getKeyframe("hook", 1);
+    std::cout << "Hook KF1 left arm: " << hookKeyframe.left_arm.x << ',' << hookKeyframe.left_arm.y << '\n';
+    std::cout << "Hook KF1 torso: " << hookKeyframe.torso.x << ',' << hookKeyframe.torso.y << '\n';
+    std::cout << "Hook KF1 head: " << hookKeyframe.head.x << ',' << hookKeyframe.head.y << '\n';
 
     spratgen::Palette palette;
     palette.base = spratgen::Color{90, 170, 220, 255};
