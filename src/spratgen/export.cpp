@@ -1,34 +1,54 @@
 #include "export.hpp"
 
+#include <stb_image_write.h>
+
+#include <iomanip>
 #include <fstream>
+#include <sstream>
 
 namespace spratgen {
 
-void FrameExporter::writeFrame(const Image& image, const std::string& path) const {
-    std::ofstream output(path, std::ios::binary);
-    if (!output) {
-        return;
+bool FrameExporter::writePNG(const RenderedFrame& frame, const std::string& path) {
+    if (frame.width <= 0 || frame.height <= 0 || frame.rgba.empty()) {
+        return false;
     }
 
-    output << "P3\n" << image.width << ' ' << image.height << "\n255\n";
-    const Color color = image.pixels.empty() ? Color{} : image.pixels.front();
-    const int pixelCount = image.width > 0 && image.height > 0 ? image.width * image.height : 1;
-    for (int index = 0; index < pixelCount; ++index) {
-        output << static_cast<int>(color.red) << ' '
-               << static_cast<int>(color.green) << ' '
-               << static_cast<int>(color.blue) << '\n';
-    }
+    return stbi_write_png(
+        path.c_str(),
+        frame.width,
+        frame.height,
+        4,
+        frame.rgba.data(),
+        frame.width * 4) != 0;
 }
 
-void FrameExporter::finalizeMetadata(const std::vector<std::string>& framePaths, const std::string& outputPath) const {
-    std::ofstream output(outputPath);
+bool FrameExporter::writeFrame(const RenderedFrame& frame, const std::string& path) {
+    return writePNG(frame, path);
+}
+
+bool FrameExporter::finalizeMetadata(const std::string& directory, int frameCount, int width, int height) {
+    std::ofstream output(directory + "/metadata.json");
     if (!output) {
-        return;
+        return false;
     }
 
-    for (const std::string& framePath : framePaths) {
-        output << framePath << '\n';
+    output << "{\n";
+    output << "  \"name\": \"spratgen_export\",\n";
+    output << "  \"frameCount\": " << frameCount << ",\n";
+    output << "  \"width\": " << width << ",\n";
+    output << "  \"height\": " << height << ",\n";
+    output << "  \"framePaths\": [";
+    for (int frameIndex = 0; frameIndex < frameCount; ++frameIndex) {
+        if (frameIndex > 0) {
+            output << ", ";
+        }
+        std::ostringstream name;
+        name << "frame_" << std::setw(3) << std::setfill('0') << frameIndex << ".png";
+        output << '"' << name.str() << '"';
     }
+    output << "]\n";
+    output << "}\n";
+    return true;
 }
 
 }  // namespace spratgen

@@ -4,6 +4,8 @@
 
 #include <cstddef>
 #include <algorithm>
+#include <iomanip>
+#include <sstream>
 #include <utility>
 
 namespace spratgen {
@@ -150,19 +152,25 @@ std::vector<RenderedFrame> Generator::generateFrames(const std::string& animType
 
     std::vector<RenderedFrame> frames;
     frames.reserve(frameCount);
-    std::vector<std::string> exportedPaths;
-    exportedPaths.reserve(frameCount);
+    const std::string outputDir = ".";
 
     for (std::size_t frameIndex = 0; frameIndex < frameCount; ++frameIndex) {
         const float t = frameCount > 1
             ? static_cast<float>(frameIndex) / static_cast<float>(frameCount - 1)
             : 0.0f;
         const PoseSkeleton posed = poseInterp_.apply(baseSkeleton, targetSkeleton, t);
-        frames.push_back(renderer_.renderFrame(silhouette_, posed, palette));
-        exportedPaths.push_back("frame_" + std::to_string(frameIndex) + ".ppm");
+        RenderedFrame frame = renderer_.renderFrame(silhouette_, posed, palette);
+        std::ostringstream fileName;
+        fileName << outputDir << "/frame_" << std::setw(3) << std::setfill('0') << frameIndex << ".png";
+        static_cast<void>(exporter_.writeFrame(frame, fileName.str()));
+        frames.push_back(std::move(frame));
     }
 
-    exporter_.finalizeMetadata(exportedPaths, "spratgen.frames.txt");
+    static_cast<void>(exporter_.finalizeMetadata(
+        outputDir,
+        static_cast<int>(frameCount),
+        silhouette_.width,
+        silhouette_.height));
     return frames;
 }
 

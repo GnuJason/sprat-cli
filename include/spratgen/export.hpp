@@ -1,16 +1,18 @@
 #pragma once
 
 #include <string>
-#include <vector>
 
-#include "palette.hpp"
+#include "renderer.hpp"
 
 namespace spratgen {
 
 class FrameExporter {
 public:
-    void writeFrame(const Image& image, const std::string& path) const;
-    void finalizeMetadata(const std::vector<std::string>& framePaths, const std::string& outputPath) const;
+    bool writeFrame(const RenderedFrame& frame, const std::string& path);
+    bool finalizeMetadata(const std::string& directory, int frameCount, int width, int height);
+
+private:
+    bool writePNG(const RenderedFrame& frame, const std::string& path);
 };
 
 }  // namespace spratgen

@@ -1,5 +1,7 @@
 #include "generator.hpp"
 
+#include "export.hpp"
+
 #include "pose_interp.hpp"
 #include "renderer.hpp"
 
@@ -71,6 +73,12 @@ int main(int argc, char** argv) {
     }
     std::cout << "Rendered frame: " << frame.width << 'x' << frame.height << '\n';
     std::cout << "Non-transparent pixels: " << nonTransparentPixels << '\n';
+
+    spratgen::FrameExporter exporter;
+    const bool wroteFrame = exporter.writeFrame(frame, "test_output.png");
+    const bool wroteMetadata = exporter.finalizeMetadata(".", 1, frame.width, frame.height);
+    std::cout << "Exported test_output.png: " << (wroteFrame ? "yes" : "no") << '\n';
+    std::cout << "Exported metadata.json: " << (wroteMetadata ? "yes" : "no") << '\n';
 
     static_cast<void>(generator.generateFrames("idle", 1));
     return 0;
