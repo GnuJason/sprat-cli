@@ -3,10 +3,67 @@
 #include <stb_image.h>
 
 #include <cstddef>
-#include <stdexcept>
+#include <algorithm>
 #include <utility>
 
 namespace spratgen {
+
+namespace {
+
+bool has_named_pose(const Skeleton& skeleton) {
+    return skeleton.head.name == "head"
+        || skeleton.torso.name == "torso"
+        || skeleton.left_arm.name == "left_arm"
+        || skeleton.right_arm.name == "right_arm"
+        || skeleton.left_leg.name == "left_leg"
+        || skeleton.right_leg.name == "right_leg";
+}
+
+Skeleton make_render_skeleton(const PoseSkeleton& posed) {
+    Skeleton skeleton;
+    skeleton.head = Joint("head", posed.head.x, posed.head.y);
+    skeleton.torso = Joint("torso", posed.torso.x, posed.torso.y);
+    skeleton.left_arm = Joint("left_arm", posed.left_arm.x, posed.left_arm.y);
+    skeleton.right_arm = Joint("right_arm", posed.right_arm.x, posed.right_arm.y);
+    skeleton.left_leg = Joint("left_leg", posed.left_leg.x, posed.left_leg.y);
+    skeleton.right_leg = Joint("right_leg", posed.right_leg.x, posed.right_leg.y);
+    skeleton.joints = {
+        skeleton.head,
+        skeleton.torso,
+        skeleton.left_arm,
+        skeleton.right_arm,
+        skeleton.left_leg,
+        skeleton.right_leg,
+    };
+    return skeleton;
+}
+
+Skeleton make_offset_skeleton(const Skeleton& skeleton, int delta) {
+    Skeleton target = skeleton;
+    target.head.x += delta;
+    target.head.y += delta;
+    target.torso.x += delta;
+    target.torso.y += delta;
+    target.left_arm.x += delta;
+    target.left_arm.y += delta;
+    target.right_arm.x += delta;
+    target.right_arm.y += delta;
+    target.left_leg.x += delta;
+    target.left_leg.y += delta;
+    target.right_leg.x += delta;
+    target.right_leg.y += delta;
+    target.joints = {
+        target.head,
+        target.torso,
+        target.left_arm,
+        target.right_arm,
+        target.left_leg,
+        target.right_leg,
+    };
+    return target;
+}
+
+}  // namespace
 
 Generator::Generator(Config config)
     : config_(std::move(config)) {}
@@ -58,16 +115,32 @@ Skeleton Generator::buildSkeleton(const Image& image) {
     return skeleton_;
 }
 
-PoseModel Generator::setupPoseModel(const std::string& animType, std::size_t frameCount) const {
+PoseModel Generator::setupPoseModel(const std::string& animType, std::size_t frameCount) {
+    if (!has_named_pose(skeleton_)) {
+        Image image;
+        image.width = silhouette_.width;
+        image.height = silhouette_.height;
+        if (!silhouette_.mask.empty()) {
+            buildSkeleton(image);
+        }
+    }
     return PoseModel(animType, frameCount);
 }
 
 std::vector<Image> Generator::generateFrames(const std::string& animType, std::size_t frameCount) {
-    Image image;
     const Image masterFrame = loadMasterFrame();
     const std::vector<Color> palette = setupPalette(masterFrame);
-    const Skeleton baseSkeleton = buildSkeleton(masterFrame);
+    const Skeleton inferredSkeleton = buildSkeleton(masterFrame);
     const PoseModel poseModel = setupPoseModel(animType, frameCount);
+    Skeleton baseSkeleton = poseModel.getKeyframe(0);
+    Skeleton targetSkeleton = poseModel.getKeyframe(1);
+
+    if (!has_named_pose(baseSkeleton)) {
+        baseSkeleton = inferredSkeleton;
+    }
+    if (!has_named_pose(targetSkeleton)) {
+        targetSkeleton = make_offset_skeleton(inferredSkeleton, 10);
+    }
 
     std::vector<Image> frames;
     frames.reserve(frameCount);
@@ -75,7 +148,11 @@ std::vector<Image> Generator::generateFrames(const std::string& animType, std::s
     exportedPaths.reserve(frameCount);
 
     for (std::size_t frameIndex = 0; frameIndex < frameCount; ++frameIndex) {
-        const Skeleton posedSkeleton = poseInterpolator_.apply(baseSkeleton, poseModel, frameIndex);
+        const float t = frameCount > 1
+            ? static_cast<float>(frameIndex) / static_cast<float>(frameCount - 1)
+            : 0.0f;
+        const PoseSkeleton posed = poseInterp_.apply(baseSkeleton, targetSkeleton, t);
+        const Skeleton posedSkeleton = make_render_skeleton(posed);
         frames.push_back(renderer_.renderFrame(posedSkeleton, palette, frameIndex));
         exportedPaths.push_back("frame_" + std::to_string(frameIndex) + ".ppm");
     }

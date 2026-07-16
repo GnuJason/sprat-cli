@@ -22,7 +22,7 @@ public:
     Image loadMasterFrame();
     std::vector<Color> setupPalette(const Image& image) const;
     Skeleton buildSkeleton(const Image& image);
-    PoseModel setupPoseModel(const std::string& animType, std::size_t frameCount) const;
+    PoseModel setupPoseModel(const std::string& animType, std::size_t frameCount);
     std::vector<Image> generateFrames(const std::string& animType, std::size_t frameCount);
     const Silhouette& silhouette() const;
     const Skeleton& skeleton() const;
@@ -34,7 +34,7 @@ private:
     PaletteManager paletteManager_;
     SilhouetteExtractor silhouetteExtractor_;
     SkeletonBuilder skeletonBuilder_;
-    PoseInterpolator poseInterpolator_;
+    PoseInterpolator poseInterp_;
     PixelRenderer renderer_;
     FrameExporter exporter_;
 };

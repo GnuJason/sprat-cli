@@ -1,14 +1,29 @@
 #pragma once
 
-#include <cstddef>
-
-#include "pose_model.hpp"
+#include "skeleton.hpp"
 
 namespace spratgen {
 
+struct PoseJoint {
+    int x = 0;
+    int y = 0;
+};
+
+struct PoseSkeleton {
+    PoseJoint head;
+    PoseJoint torso;
+    PoseJoint left_arm;
+    PoseJoint right_arm;
+    PoseJoint left_leg;
+    PoseJoint right_leg;
+};
+
 class PoseInterpolator {
 public:
-    Skeleton apply(const Skeleton& skeleton, const PoseModel& poseModel, std::size_t frameIndex) const;
+    PoseSkeleton apply(const Skeleton& base, const Skeleton& target, float t);
+
+private:
+    PoseJoint lerpJoint(const Joint& a, const Joint& b, float t);
 };
 
 }  // namespace spratgen
