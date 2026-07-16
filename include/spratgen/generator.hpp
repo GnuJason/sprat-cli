@@ -19,14 +19,16 @@ class Generator {
 public:
     explicit Generator(Config config);
 
-    Image loadMasterFrame() const;
+    Image loadMasterFrame();
     std::vector<Color> setupPalette(const Image& image) const;
-    Skeleton buildSkeleton(const Image& image) const;
+    Skeleton buildSkeleton(const Image& image);
     PoseModel setupPoseModel(const std::string& animType, std::size_t frameCount) const;
-    std::vector<Image> generateFrames(const std::string& animType, std::size_t frameCount) const;
+    std::vector<Image> generateFrames(const std::string& animType, std::size_t frameCount);
+    const Silhouette& silhouette() const;
 
 private:
     Config config_;
+    Silhouette silhouette_;
     PaletteManager paletteManager_;
     SilhouetteExtractor silhouetteExtractor_;
     SkeletonBuilder skeletonBuilder_;
