@@ -1,6 +1,7 @@
 #include "generator.hpp"
 
 #include "pose_interp.hpp"
+#include "renderer.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -56,6 +57,20 @@ int main(int argc, char** argv) {
     std::cout << "Interp right arm: " << posed.right_arm.x << ',' << posed.right_arm.y << '\n';
     std::cout << "Interp left leg: " << posed.left_leg.x << ',' << posed.left_leg.y << '\n';
     std::cout << "Interp right leg: " << posed.right_leg.x << ',' << posed.right_leg.y << '\n';
+
+    spratgen::Palette palette;
+    palette.base = spratgen::Color{90, 170, 220, 255};
+    palette.accent = spratgen::Color{220, 160, 80, 255};
+    spratgen::PixelRenderer renderer;
+    const spratgen::RenderedFrame frame = renderer.renderFrame(silhouette, posed, palette);
+    unsigned long long nonTransparentPixels = 0;
+    for (std::size_t offset = 3; offset < frame.rgba.size(); offset += 4U) {
+        if (frame.rgba[offset] != 0) {
+            ++nonTransparentPixels;
+        }
+    }
+    std::cout << "Rendered frame: " << frame.width << 'x' << frame.height << '\n';
+    std::cout << "Non-transparent pixels: " << nonTransparentPixels << '\n';
 
     static_cast<void>(generator.generateFrames("idle", 1));
     return 0;

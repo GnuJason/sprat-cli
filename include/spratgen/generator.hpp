@@ -20,10 +20,10 @@ public:
     explicit Generator(Config config);
 
     Image loadMasterFrame();
-    std::vector<Color> setupPalette(const Image& image) const;
+    Palette setupPalette(const Image& image) const;
     Skeleton buildSkeleton(const Image& image);
     PoseModel setupPoseModel(const std::string& animType, std::size_t frameCount);
-    std::vector<Image> generateFrames(const std::string& animType, std::size_t frameCount);
+    std::vector<RenderedFrame> generateFrames(const std::string& animType, std::size_t frameCount);
     const Silhouette& silhouette() const;
     const Skeleton& skeleton() const;
 

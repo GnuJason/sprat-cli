@@ -103,8 +103,14 @@ Image Generator::loadMasterFrame() {
     return image;
 }
 
-std::vector<Color> Generator::setupPalette(const Image& image) const {
-    return paletteManager_.quantize(paletteManager_.extractFromImage(image), 16);
+Palette Generator::setupPalette(const Image& image) const {
+    const std::vector<Color> colors = paletteManager_.quantize(paletteManager_.extractFromImage(image), 16);
+    Palette palette;
+    if (!colors.empty()) {
+        palette.base = colors.front();
+        palette.accent = colors.size() > 1 ? colors[1] : colors.front();
+    }
+    return palette;
 }
 
 Skeleton Generator::buildSkeleton(const Image& image) {
@@ -127,9 +133,9 @@ PoseModel Generator::setupPoseModel(const std::string& animType, std::size_t fra
     return PoseModel(animType, frameCount);
 }
 
-std::vector<Image> Generator::generateFrames(const std::string& animType, std::size_t frameCount) {
+std::vector<RenderedFrame> Generator::generateFrames(const std::string& animType, std::size_t frameCount) {
     const Image masterFrame = loadMasterFrame();
-    const std::vector<Color> palette = setupPalette(masterFrame);
+    const Palette palette = setupPalette(masterFrame);
     const Skeleton inferredSkeleton = buildSkeleton(masterFrame);
     const PoseModel poseModel = setupPoseModel(animType, frameCount);
     Skeleton baseSkeleton = poseModel.getKeyframe(0);
@@ -142,7 +148,7 @@ std::vector<Image> Generator::generateFrames(const std::string& animType, std::s
         targetSkeleton = make_offset_skeleton(inferredSkeleton, 10);
     }
 
-    std::vector<Image> frames;
+    std::vector<RenderedFrame> frames;
     frames.reserve(frameCount);
     std::vector<std::string> exportedPaths;
     exportedPaths.reserve(frameCount);
@@ -152,8 +158,7 @@ std::vector<Image> Generator::generateFrames(const std::string& animType, std::s
             ? static_cast<float>(frameIndex) / static_cast<float>(frameCount - 1)
             : 0.0f;
         const PoseSkeleton posed = poseInterp_.apply(baseSkeleton, targetSkeleton, t);
-        const Skeleton posedSkeleton = make_render_skeleton(posed);
-        frames.push_back(renderer_.renderFrame(posedSkeleton, palette, frameIndex));
+        frames.push_back(renderer_.renderFrame(silhouette_, posed, palette));
         exportedPaths.push_back("frame_" + std::to_string(frameIndex) + ".ppm");
     }
 
