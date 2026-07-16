@@ -26,7 +26,13 @@ bool FrameExporter::writeFrame(const RenderedFrame& frame, const std::string& pa
     return writePNG(frame, path);
 }
 
-bool FrameExporter::finalizeMetadata(const std::string& directory, int frameCount, int width, int height) {
+bool FrameExporter::finalizeMetadata(
+    const std::string& directory,
+    const std::string& animationName,
+    bool loop,
+    int frameCount,
+    int width,
+    int height) {
     std::ofstream output(directory + "/metadata.json");
     if (!output) {
         return false;
@@ -34,6 +40,8 @@ bool FrameExporter::finalizeMetadata(const std::string& directory, int frameCoun
 
     output << "{\n";
     output << "  \"name\": \"spratgen_export\",\n";
+    output << "  \"animation\": \"" << animationName << "\",\n";
+    output << "  \"loop\": " << (loop ? "true" : "false") << ",\n";
     output << "  \"frameCount\": " << frameCount << ",\n";
     output << "  \"width\": " << width << ",\n";
     output << "  \"height\": " << height << ",\n";
@@ -43,7 +51,7 @@ bool FrameExporter::finalizeMetadata(const std::string& directory, int frameCoun
             output << ", ";
         }
         std::ostringstream name;
-        name << "frame_" << std::setw(3) << std::setfill('0') << frameIndex << ".png";
+        name << animationName << "_frame_" << std::setw(3) << std::setfill('0') << frameIndex << ".png";
         output << '"' << name.str() << '"';
     }
     output << "]\n";

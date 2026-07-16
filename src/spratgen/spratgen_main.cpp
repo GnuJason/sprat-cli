@@ -7,6 +7,7 @@
 #include "renderer.hpp"
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstdint>
 #include <iostream>
 
@@ -33,7 +34,14 @@ spratgen::Skeleton offset_skeleton(const spratgen::Skeleton& skeleton, int delta
 
 int main(int argc, char** argv) {
     const spratgen::Config config = spratgen::Config::fromArgs(argc, argv);
+    if (config.animName.empty()) {
+        std::cerr << "spratgen: --anim is required\n";
+        return EXIT_FAILURE;
+    }
+
     spratgen::Generator generator(config);
+    generator.setAnimation(config.animName, config.frameCount);
+    std::cout << "Selected animation: " << config.animName << '\n';
 
     const spratgen::Image masterFrame = generator.loadMasterFrame();
     const spratgen::Silhouette& silhouette = generator.silhouette();
@@ -90,10 +98,10 @@ int main(int argc, char** argv) {
 
     spratgen::FrameExporter exporter;
     const bool wroteFrame = exporter.writeFrame(frame, "test_output.png");
-    const bool wroteMetadata = exporter.finalizeMetadata(".", 1, frame.width, frame.height);
+    const bool wroteMetadata = exporter.finalizeMetadata(".", "debug", false, 1, frame.width, frame.height);
     std::cout << "Exported test_output.png: " << (wroteFrame ? "yes" : "no") << '\n';
     std::cout << "Exported metadata.json: " << (wroteMetadata ? "yes" : "no") << '\n';
 
-    static_cast<void>(generator.generateFrames("idle", 1));
+    static_cast<void>(generator.generateFrames());
     return 0;
 }

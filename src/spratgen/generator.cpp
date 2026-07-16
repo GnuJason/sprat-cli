@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <filesystem>
 #include <iomanip>
 #include <sstream>
 #include <utility>
@@ -142,11 +143,11 @@ Generator::Generator(Config config)
 
 Image Generator::loadMasterFrame() {
     Image image;
-    if (config_.args.size() > 1) {
+    if (!config_.inputPath.empty()) {
         int width = 0;
         int height = 0;
         int channels = 0;
-        unsigned char* rawPixels = stbi_load(config_.args[1].c_str(), &width, &height, &channels, 4);
+        unsigned char* rawPixels = stbi_load(config_.inputPath.c_str(), &width, &height, &channels, 4);
         if (rawPixels != nullptr) {
             image.width = width;
             image.height = height;
@@ -193,6 +194,11 @@ Skeleton Generator::buildSkeleton(const Image& image) {
     return skeleton_;
 }
 
+void Generator::setAnimation(const std::string& name, int overrideCount) {
+    animName_ = name;
+    frameCountOverride_ = overrideCount;
+}
+
 void Generator::setupPoseModel() {
     if (!has_named_pose(skeleton_)) {
         Image image;
@@ -206,17 +212,19 @@ void Generator::setupPoseModel() {
     poseModel_.loadDefaults();
 }
 
-std::vector<RenderedFrame> Generator::generateFrames(const std::string& animType, std::size_t /*frameCount*/) {
+std::vector<RenderedFrame> Generator::generateFrames() {
     const Image masterFrame = loadMasterFrame();
     const Palette palette = setupPalette(masterFrame);
     const Skeleton inferredSkeleton = buildSkeleton(masterFrame);
     setupPoseModel();
-    const AnimationTemplate& animationTemplate = poseModel_.getTemplate(animType);
-    const std::size_t totalFrames = static_cast<std::size_t>(poseModel_.getFrameCount(animType));
+    const AnimationTemplate& animationTemplate = poseModel_.getTemplate(animName_);
+    const int resolvedFrameCount = frameCountOverride_ > 0 ? frameCountOverride_ : animationTemplate.frameCount;
+    const std::size_t totalFrames = static_cast<std::size_t>(resolvedFrameCount);
 
     std::vector<RenderedFrame> frames;
     frames.reserve(totalFrames);
-    const std::string outputDir = ".";
+    const std::string& outputDir = config_.outputDir;
+    std::filesystem::create_directories(outputDir);
 
     for (std::size_t frameIndex = 0; frameIndex < totalFrames; ++frameIndex) {
         const float t = totalFrames > 1
@@ -231,13 +239,15 @@ std::vector<RenderedFrame> Generator::generateFrames(const std::string& animType
             apply_animation_easing(animationTemplate.name, span.localT));
         RenderedFrame frame = renderer_.renderFrame(silhouette_, posed, palette);
         std::ostringstream fileName;
-        fileName << outputDir << "/frame_" << std::setw(3) << std::setfill('0') << frameIndex << ".png";
+        fileName << outputDir << "/" << animName_ << "_frame_" << std::setw(3) << std::setfill('0') << frameIndex << ".png";
         static_cast<void>(exporter_.writeFrame(frame, fileName.str()));
         frames.push_back(std::move(frame));
     }
 
     static_cast<void>(exporter_.finalizeMetadata(
         outputDir,
+        animName_,
+        animationTemplate.loop,
         static_cast<int>(totalFrames),
         silhouette_.width,
         silhouette_.height));

@@ -22,13 +22,16 @@ public:
     Image loadMasterFrame();
     Palette setupPalette(const Image& image) const;
     Skeleton buildSkeleton(const Image& image);
+    void setAnimation(const std::string& name, int overrideCount);
     void setupPoseModel();
-    std::vector<RenderedFrame> generateFrames(const std::string& animType, std::size_t frameCount);
+    std::vector<RenderedFrame> generateFrames();
     const Silhouette& silhouette() const;
     const Skeleton& skeleton() const;
 
 private:
     Config config_;
+    std::string animName_;
+    int frameCountOverride_ = 0;
     Silhouette silhouette_;
     Skeleton skeleton_;
     PaletteManager paletteManager_;

@@ -97,6 +97,13 @@ Per-command help:
 ./build/spratunpack --help
 ```
 
+Generate boxer animation frames with `spratgen`:
+
+```sh
+./build/spratgen --input master.png --output out/jab --anim jab
+./build/spratgen --input master.png --output out/walk --anim walk --frames 40
+```
+
 ## Installation
 
 Install binaries, man page, and global profile config:
