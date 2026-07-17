@@ -194,7 +194,7 @@ std::vector<RenderedFrame> Generator::generateFrames() {
             baseSkeleton,
             targetSkeleton,
             curvedT);
-        RenderedFrame frame = renderer_.renderFrame(silhouette_, posed, palette_);
+        RenderedFrame frame = renderer_.renderFrame(masterFrame, silhouette_, posed, palette_);
         std::ostringstream fileName;
         fileName << outputDir << "/" << animName_ << "_frame_" << std::setw(3) << std::setfill('0') << frameIndex << ".png";
         static_cast<void>(exporter_.writeFrame(frame, fileName.str()));

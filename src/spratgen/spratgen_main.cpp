@@ -86,7 +86,7 @@ int main(int argc, char** argv) {
     palette.base = spratgen::Color{90, 170, 220, 255};
     palette.accent = spratgen::Color{220, 160, 80, 255};
     spratgen::PixelRenderer renderer;
-    const spratgen::RenderedFrame frame = renderer.renderFrame(silhouette, posed, palette);
+    const spratgen::RenderedFrame frame = renderer.renderFrame(masterFrame, silhouette, posed, palette);
     unsigned long long nonTransparentPixels = 0;
     for (std::size_t offset = 3; offset < frame.rgba.size(); offset += 4U) {
         if (frame.rgba[offset] != 0) {

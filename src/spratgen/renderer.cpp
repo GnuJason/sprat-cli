@@ -181,7 +181,7 @@ std::pair<int, int> transform_pixel(int x, int y, const Bounds& bounds, const Sk
 
 }  // namespace
 
-RenderedFrame PixelRenderer::renderFrame(const Silhouette& silhouette, const PoseSkeleton& posed, const Palette& palette) {
+RenderedFrame PixelRenderer::renderFrame(const Image& sourceImage, const Silhouette& silhouette, const PoseSkeleton& posed, const Palette& palette) {
     RenderedFrame frame;
     frame.width = silhouette.width;
     frame.height = silhouette.height;
@@ -194,8 +194,8 @@ RenderedFrame PixelRenderer::renderFrame(const Silhouette& silhouette, const Pos
     const Skeleton baseSkeleton = skeletonBuilder.build(silhouette);
 
     clear(frame);
-    drawBody(frame, silhouette, baseSkeleton, posed, palette);
-    drawOutline(frame, silhouette, baseSkeleton, posed);
+    drawBody(frame, sourceImage, silhouette, baseSkeleton, posed, palette);
+    drawOutline(frame, sourceImage, silhouette, baseSkeleton, posed);
     applyPose(frame, baseSkeleton, posed);
     return frame;
 }
@@ -209,7 +209,11 @@ void PixelRenderer::clear(RenderedFrame& out) {
     }
 }
 
-void PixelRenderer::drawOutline(RenderedFrame& out, const Silhouette& silhouette, const Skeleton& baseSkeleton, const PoseSkeleton& posed) {
+void PixelRenderer::drawOutline(RenderedFrame& out, const Image& sourceImage, const Silhouette& silhouette, const Skeleton& baseSkeleton, const PoseSkeleton& posed) {
+    if (sourceImage.width == silhouette.width && sourceImage.height == silhouette.height && sourceImage.pixels.size() >= silhouette.outline.size()) {
+        return;
+    }
+
     const Bounds bounds = compute_bounds(silhouette);
     for (int y = 0; y < silhouette.height; ++y) {
         for (int x = 0; x < silhouette.width; ++x) {
@@ -224,7 +228,7 @@ void PixelRenderer::drawOutline(RenderedFrame& out, const Silhouette& silhouette
     }
 }
 
-void PixelRenderer::drawBody(RenderedFrame& out, const Silhouette& silhouette, const Skeleton& baseSkeleton, const PoseSkeleton& posed, const Palette& palette) {
+void PixelRenderer::drawBody(RenderedFrame& out, const Image& sourceImage, const Silhouette& silhouette, const Skeleton& baseSkeleton, const PoseSkeleton& posed, const Palette& palette) {
     const Bounds bounds = compute_bounds(silhouette);
     for (int y = 0; y < silhouette.height; ++y) {
         for (int x = 0; x < silhouette.width; ++x) {
@@ -233,10 +237,21 @@ void PixelRenderer::drawBody(RenderedFrame& out, const Silhouette& silhouette, c
                 continue;
             }
 
-            const BodyRegion region = classify_region(x, y, bounds, baseSkeleton);
-            const Color color = color_for_region(palette, region);
+            Color color{};
+            bool hasSourceColor = false;
+            if (sourceImage.width == silhouette.width && sourceImage.height == silhouette.height && index < sourceImage.pixels.size()) {
+                color = sourceImage.pixels[index];
+                hasSourceColor = color.alpha > 0;
+            }
+
+            if (!hasSourceColor) {
+                const BodyRegion region = classify_region(x, y, bounds, baseSkeleton);
+                color = color_for_region(palette, region);
+                color.alpha = 255;
+            }
+
             const auto [destX, destY] = transform_pixel(x, y, bounds, baseSkeleton, posed);
-            putPixel(out, destX, destY, color.red, color.green, color.blue, 255);
+            putPixel(out, destX, destY, color.red, color.green, color.blue, color.alpha);
         }
     }
 }

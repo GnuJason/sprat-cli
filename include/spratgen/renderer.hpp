@@ -19,12 +19,12 @@ struct RenderedFrame {
 
 class PixelRenderer {
 public:
-    RenderedFrame renderFrame(const Silhouette& silhouette, const PoseSkeleton& posed, const Palette& palette);
+    RenderedFrame renderFrame(const Image& sourceImage, const Silhouette& silhouette, const PoseSkeleton& posed, const Palette& palette);
 
 private:
     void clear(RenderedFrame& out);
-    void drawOutline(RenderedFrame& out, const Silhouette& silhouette, const Skeleton& baseSkeleton, const PoseSkeleton& posed);
-    void drawBody(RenderedFrame& out, const Silhouette& silhouette, const Skeleton& baseSkeleton, const PoseSkeleton& posed, const Palette& palette);
+    void drawOutline(RenderedFrame& out, const Image& sourceImage, const Silhouette& silhouette, const Skeleton& baseSkeleton, const PoseSkeleton& posed);
+    void drawBody(RenderedFrame& out, const Image& sourceImage, const Silhouette& silhouette, const Skeleton& baseSkeleton, const PoseSkeleton& posed, const Palette& palette);
     void applyPose(RenderedFrame& out, const Skeleton& baseSkeleton, const PoseSkeleton& posed);
     void putPixel(RenderedFrame& out, int x, int y, std::uint8_t red, std::uint8_t green, std::uint8_t blue, std::uint8_t alpha);
 };
