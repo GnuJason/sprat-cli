@@ -50,8 +50,21 @@ void SilhouetteExtractor::thresholdMask(const Image& image, Silhouette& out) {
     out.outline.assign(pixelCount, 0);
 
     const std::size_t limit = std::min(pixelCount, image.pixels.size());
+    bool useAlphaMask = false;
+    for (std::size_t index = 0; index < limit; ++index) {
+        if (image.pixels[index].alpha < 255) {
+            useAlphaMask = true;
+            break;
+        }
+    }
+
     for (std::size_t index = 0; index < limit; ++index) {
         const Color& color = image.pixels[index];
+        if (useAlphaMask) {
+            out.mask[index] = color.alpha >= 32 ? 1U : 0U;
+            continue;
+        }
+
         const std::uint8_t gray = toGray(color.red, color.green, color.blue);
         out.mask[index] = gray < 200 ? 1U : 0U;
     }

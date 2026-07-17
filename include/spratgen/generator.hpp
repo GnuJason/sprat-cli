@@ -39,6 +39,7 @@ private:
     SkeletonBuilder skeletonBuilder_;
     PoseModel poseModel_;
     PoseInterpolator poseInterp_;
+    Palette palette_;
     PixelRenderer renderer_;
     FrameExporter exporter_;
 };

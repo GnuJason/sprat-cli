@@ -138,13 +138,8 @@ Image Generator::loadMasterFrame() {
 }
 
 Palette Generator::setupPalette(const Image& image) const {
-    const std::vector<Color> colors = paletteManager_.quantize(paletteManager_.extractFromImage(image), 16);
-    Palette palette;
-    if (!colors.empty()) {
-        palette.base = colors.front();
-        palette.accent = colors.size() > 1 ? colors[1] : colors.front();
-    }
-    return palette;
+    static_cast<void>(image);
+    return makeBoxerPalette();
 }
 
 Skeleton Generator::buildSkeleton(const Image& image) {
@@ -175,7 +170,7 @@ void Generator::setupPoseModel() {
 
 std::vector<RenderedFrame> Generator::generateFrames() {
     const Image masterFrame = loadMasterFrame();
-    const Palette palette = setupPalette(masterFrame);
+    palette_ = setupPalette(masterFrame);
     const Skeleton inferredSkeleton = buildSkeleton(masterFrame);
     setupPoseModel();
     const AnimationTemplate& animationTemplate = poseModel_.getTemplate(animName_);
@@ -199,7 +194,7 @@ std::vector<RenderedFrame> Generator::generateFrames() {
             baseSkeleton,
             targetSkeleton,
             curvedT);
-        RenderedFrame frame = renderer_.renderFrame(silhouette_, posed, palette);
+        RenderedFrame frame = renderer_.renderFrame(silhouette_, posed, palette_);
         std::ostringstream fileName;
         fileName << outputDir << "/" << animName_ << "_frame_" << std::setw(3) << std::setfill('0') << frameIndex << ".png";
         static_cast<void>(exporter_.writeFrame(frame, fileName.str()));

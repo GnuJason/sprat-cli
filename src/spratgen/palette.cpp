@@ -4,6 +4,16 @@
 
 namespace spratgen {
 
+Palette makeBoxerPalette() {
+    Palette palette;
+    palette.base = Color{255, 0, 0, 255};
+    palette.accent = Color{255, 255, 255, 255};
+    palette.gloves = Color{255, 0, 0, 255};
+    palette.shorts = Color{255, 255, 255, 255};
+    palette.skin = Color{240, 200, 160, 255};
+    return palette;
+}
+
 std::vector<Color> PaletteManager::extractFromImage(const Image& image) const {
     return image.pixels;
 }

@@ -13,6 +13,14 @@ struct Color {
     std::uint8_t alpha = 255;
 };
 
+struct Palette {
+    Color base;
+    Color accent;
+    Color gloves;
+    Color shorts;
+    Color skin;
+};
+
 struct Image {
     int width = 0;
     int height = 0;
@@ -24,5 +32,7 @@ public:
     std::vector<Color> extractFromImage(const Image& image) const;
     std::vector<Color> quantize(const std::vector<Color>& colors, std::size_t maxColors) const;
 };
+
+Palette makeBoxerPalette();
 
 }  // namespace spratgen
