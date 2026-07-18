@@ -25,6 +25,7 @@ public:
     void setAnimation(const std::string& name, int overrideCount);
     void setupPoseModel();
     std::vector<RenderedFrame> generateFrames();
+    std::vector<RenderedFrame> generateFrames(const Image& masterFrame);
     const Silhouette& silhouette() const;
     const Skeleton& skeleton() const;
 

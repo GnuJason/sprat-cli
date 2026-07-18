@@ -11,8 +11,12 @@ add_executable(layout_test layout_test.cpp)
 target_link_libraries(layout_test PRIVATE spratcore)
 target_include_directories(layout_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
 
+add_executable(spratforge_test spratforge_test.cpp)
+target_link_libraries(spratforge_test PRIVATE libresprite_core spratcore)
+
 add_test(NAME core_test COMMAND core_test)
 add_test(NAME layout_test COMMAND layout_test)
+add_test(NAME spratforge COMMAND spratforge_test $<TARGET_FILE:spratforge>)
 
 add_test(
     NAME pipeline

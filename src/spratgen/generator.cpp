@@ -170,6 +170,16 @@ void Generator::setupPoseModel() {
 
 std::vector<RenderedFrame> Generator::generateFrames() {
     const Image masterFrame = loadMasterFrame();
+    return generateFrames(masterFrame);
+}
+
+std::vector<RenderedFrame> Generator::generateFrames(const Image& masterFrame) {
+    if (masterFrame.width <= 0 || masterFrame.height <= 0
+        || masterFrame.pixels.size() != static_cast<std::size_t>(masterFrame.width) * static_cast<std::size_t>(masterFrame.height)) {
+        return {};
+    }
+
+    silhouette_ = silhouetteExtractor_.extract(masterFrame);
     palette_ = setupPalette(masterFrame);
     const Skeleton inferredSkeleton = buildSkeleton(masterFrame);
     setupPoseModel();

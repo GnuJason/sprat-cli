@@ -537,8 +537,7 @@ target_link_libraries(spratunpack PRIVATE spratcore ${LIBARCHIVE_LIBRARIES})
 target_include_directories(spratunpack PRIVATE ${LIBARCHIVE_INCLUDE_DIRS})
 target_include_directories(spratunpack SYSTEM PRIVATE ${STB_DIR})
 
-add_executable(spratgen
-    src/spratgen/spratgen_main.cpp
+add_library(spratgen_core STATIC
     src/spratgen/config.cpp
     src/spratgen/generator.cpp
     src/spratgen/silhouette.cpp
@@ -549,10 +548,24 @@ add_executable(spratgen
     src/spratgen/renderer.cpp
     src/spratgen/export.cpp
 )
-target_link_libraries(spratgen PRIVATE spratcore ${LIBARCHIVE_LIBRARIES})
-target_include_directories(spratgen PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include/spratgen)
-target_include_directories(spratgen PRIVATE ${LIBARCHIVE_INCLUDE_DIRS})
-target_include_directories(spratgen SYSTEM PRIVATE ${STB_DIR})
+target_link_libraries(spratgen_core PUBLIC spratcore ${LIBARCHIVE_LIBRARIES})
+target_include_directories(spratgen_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include/spratgen)
+target_include_directories(spratgen_core PRIVATE ${LIBARCHIVE_INCLUDE_DIRS})
+target_include_directories(spratgen_core SYSTEM PRIVATE ${STB_DIR})
+
+add_library(libresprite_core STATIC
+    third_party/libresprite_core/src/pixel_engine.cpp
+)
+target_include_directories(libresprite_core PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/libresprite_core/include)
+target_include_directories(libresprite_core SYSTEM PRIVATE ${STB_DIR})
+
+add_executable(spratgen src/spratgen/spratgen_main.cpp)
+target_link_libraries(spratgen PRIVATE spratgen_core)
+
+add_executable(spratforge tools/spratforge/spratforge_main.cpp)
+target_link_libraries(spratforge PRIVATE spratgen_core libresprite_core)
+target_include_directories(spratforge PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include/spratgen)
 
 target_compile_definitions(spratconvert PRIVATE SPRAT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 target_compile_definitions(spratlayout PRIVATE
@@ -582,7 +595,7 @@ add_custom_target(sprat_copy_transforms ALL
     COMMENT "Copying transforms/ to ${_sprat_bin_dir}"
     VERBATIM)
 
-foreach(target spratlayout spratpack spratconvert spratframes spratunpack spratgen)
+foreach(target spratlayout spratpack spratconvert spratframes spratunpack spratgen spratforge)
     add_custom_command(TARGET ${target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${CMAKE_CURRENT_SOURCE_DIR}/spratprofiles.cfg
@@ -641,7 +654,7 @@ foreach(target spratlayout spratpack spratconvert spratframes spratunpack spratg
     endif()
 endforeach()
 
-install(TARGETS spratlayout spratpack spratconvert spratframes spratunpack spratgen
+install(TARGETS spratlayout spratpack spratconvert spratframes spratunpack spratgen spratforge
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES spratprofiles.cfg
     DESTINATION ${CMAKE_INSTALL_DATADIR}/sprat)
